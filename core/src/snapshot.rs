@@ -95,6 +95,7 @@ impl World {
         }
         w.u32(self.tally.births);
         w.u32(self.tally.deaths);
+        w.u32(self.tally.bites);
         w.f32(self.tally.approach_sum);
         w.u32(self.tally.approach_n);
 
@@ -170,6 +171,7 @@ impl World {
         w.rng = crate::rng::Rng::from_state(st);
         w.tally.births = r.u32()?;
         w.tally.deaths = r.u32()?;
+        w.tally.bites = r.u32()?;
         w.tally.approach_sum = r.f32()?;
         w.tally.approach_n = r.u32()?;
 

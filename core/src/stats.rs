@@ -19,7 +19,8 @@ pub const F_MEAN_SENSE: usize = 11;
 pub const F_MEAN_DIET: usize = 12;
 pub const F_NUTRIENTS: usize = 13;
 pub const F_GENERATION: usize = 14;
-pub const N_FIELDS: usize = 15;
+pub const F_BITES: usize = 15;
+pub const N_FIELDS: usize = 16;
 pub const SAMPLE_STRIDE: usize = N_FIELDS + HUE_BINS;
 
 /// Accumulated during a tick, folded into a sample every `every` ticks.
@@ -27,6 +28,7 @@ pub const SAMPLE_STRIDE: usize = N_FIELDS + HUE_BINS;
 pub struct Tally {
     pub births: u32,
     pub deaths: u32,
+    pub bites: u32,
     pub approach_sum: f32,
     pub approach_n: u32,
 }

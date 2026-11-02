@@ -1,11 +1,21 @@
-// Pipeline smoke test: load the WASM module and show that it answers.
-import init, { hello } from "../pkg/tidepool_core.js";
+import { App } from "./ui/app.js";
+import { Core } from "./wasm.js";
 
-async function main(): Promise<void> {
-  await init();
-  const app = document.getElementById("app");
-  if (!app) throw new Error("no #app");
-  app.textContent = `tidepool core says ${hello(42)}`;
+function seedFromHash(): number {
+  const m = /seed=(\d+)/.exec(location.hash);
+  if (m) return Number(m[1]) >>> 0;
+  return (Math.random() * 0xffffffff) >>> 0;
 }
 
-void main();
+async function main(): Promise<void> {
+  const core = await Core.load();
+  const seed = seedFromHash();
+  history.replaceState(null, "", `#seed=${seed}`);
+  new App(core, seed);
+}
+
+main().catch((err: unknown) => {
+  const app = document.getElementById("app");
+  if (app) app.textContent = `Tidepool failed to start: ${err instanceof Error ? err.message : String(err)}`;
+  console.error(err);
+});

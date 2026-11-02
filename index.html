@@ -7,7 +7,39 @@
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <header id="bar">
+        <span class="brand">Tidepool</span>
+        <button id="play" title="space">Pause</button>
+        <div class="seg" id="speed">
+          <button data-s="1" class="on">1×</button>
+          <button data-s="4">4×</button>
+          <button data-s="16">16×</button>
+          <button data-s="0">max</button>
+        </div>
+        <span class="stat">tick <b id="tick">0</b></span>
+        <span class="stat">pop <b id="pop">0</b></span>
+        <span class="stat">plants <b id="plants">0</b></span>
+        <span class="stat">gen <b id="gen">0</b></span>
+        <span class="stat">tps <b id="tps">0</b></span>
+        <span class="spacer"></span>
+        <label class="seedlbl">seed <input id="seed" type="text" size="9" spellcheck="false" /></label>
+        <button id="new">New world</button>
+        <button id="life" title="Drop 50 random founders in">Add life</button>
+        <button id="save" title="Download a snapshot">Save</button>
+        <button id="load" title="Restore a snapshot">Load</button>
+        <input id="file" type="file" accept=".tdpl" hidden />
+      </header>
+      <main id="main">
+        <canvas id="world"></canvas>
+        <aside id="side"></aside>
+      </main>
+      <footer id="charts">
+        <div class="chart"><span class="lbl">population · <i class="h">herbivores</i> <i class="o">omnivores</i> <i class="c">carnivores</i></span><canvas id="popchart"></canvas></div>
+        <div class="chart"><span class="lbl">lineages by colour</span><canvas id="huechart"></canvas></div>
+        <div class="chart"><span class="lbl">food-seeking score</span><canvas id="approachchart"></canvas></div>
+      </footer>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

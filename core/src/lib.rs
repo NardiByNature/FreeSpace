@@ -92,6 +92,12 @@ impl Sim {
     pub fn max_creatures(&self) -> u32 {
         self.world.cfg.max_creatures
     }
+    pub fn plant_max_energy(&self) -> f32 {
+        self.world.cfg.plant_max_energy
+    }
+    pub fn plant_radius(&self) -> f32 {
+        self.world.cfg.plant_radius
+    }
     pub fn max_generation(&self) -> u32 {
         let c = &self.world.creatures;
         (0..c.capacity()).filter(|&i| c.alive[i]).map(|i| c.generation[i]).max().unwrap_or(0)

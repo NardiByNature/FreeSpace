@@ -20,8 +20,14 @@ pub struct Config {
     pub regrow_rate: f32,
     pub diffuse_every: u32,
     pub diffuse_k: f32,
+    /// Nutrients a seedling draws from its cell when it sprouts (becomes its energy).
     pub plant_cost: f32,
-    pub plant_energy: f32,
+    /// Energy a bush can hold; its drawn radius scales with sqrt(energy / max).
+    pub plant_max_energy: f32,
+    /// Nutrients a bush pulls from its cell per tick while below max.
+    pub plant_growth: f32,
+    /// Energy a grazer takes per tick of contact.
+    pub graze_bite: f32,
     pub plant_spawn_rate: f32,
     pub plant_radius: f32,
     pub max_plants: u32,
@@ -35,6 +41,8 @@ pub struct Config {
     pub bite_damage: f32,
     pub bite_cost: f32,
     pub bite_size_ratio: f32,
+    /// Lunge: a bite lands within this multiple of the two bodies' radii.
+    pub bite_reach: f32,
     pub corpse_return: f32,
     pub child_share: f32,
     pub spatial_cell: f32,
@@ -42,6 +50,8 @@ pub struct Config {
     pub history_every: u32,
     /// When the population drops below this, founders wash in. 0 disables.
     pub min_population: u32,
+    /// 0 = uniform soil, 1 = strong fertile patches with barren ground between.
+    pub terrain_contrast: f32,
 }
 
 impl Default for Config {
@@ -55,10 +65,12 @@ impl Default for Config {
             regrow_rate: 0.0015,
             diffuse_every: 8,
             diffuse_k: 0.1,
-            plant_cost: 25.0,
-            plant_energy: 25.0,
-            plant_spawn_rate: 0.02,
-            plant_radius: 2.0,
+            plant_cost: 4.0,
+            plant_max_energy: 40.0,
+            plant_growth: 0.05,
+            graze_bite: 4.0,
+            plant_spawn_rate: 0.004,
+            plant_radius: 4.0,
             max_plants: 40_000,
             max_creatures: 20_000,
             initial_creatures: 400,
@@ -67,21 +79,23 @@ impl Default for Config {
             move_cost: 0.05,
             sense_cost: 0.01,
             max_turn: 0.25,
-            bite_damage: 15.0,
-            bite_cost: 1.0,
-            bite_size_ratio: 1.1,
+            bite_damage: 40.0,
+            bite_cost: 0.5,
+            bite_size_ratio: 1.25,
+            bite_reach: 1.6,
             corpse_return: 0.5,
             child_share: 0.4,
             spatial_cell: 32.0,
             history_cap: 2048,
             history_every: 10,
             min_population: 20,
+            terrain_contrast: 0.8,
         }
     }
 }
 
 impl Config {
-    pub const N_FIELDS: usize = 30;
+    pub const N_FIELDS: usize = 34;
     /// Flat f32 encoding for snapshots. Integers survive exactly below 2^24.
     pub fn to_fields(&self) -> [f32; Self::N_FIELDS] {
         [
@@ -94,7 +108,9 @@ impl Config {
             self.diffuse_every as f32,
             self.diffuse_k,
             self.plant_cost,
-            self.plant_energy,
+            self.plant_max_energy,
+            self.plant_growth,
+            self.graze_bite,
             self.plant_spawn_rate,
             self.plant_radius,
             self.max_plants as f32,
@@ -108,46 +124,58 @@ impl Config {
             self.bite_damage,
             self.bite_cost,
             self.bite_size_ratio,
+            self.bite_reach,
             self.corpse_return,
             self.child_share,
             self.spatial_cell,
             self.history_cap as f32,
             self.history_every as f32,
             self.min_population as f32,
+            self.terrain_contrast,
             0.0,
         ]
     }
     pub fn from_fields(f: &[f32; Self::N_FIELDS]) -> Config {
+        let mut k = 0usize;
+        let mut next = || {
+            let v = f[k];
+            k += 1;
+            v
+        };
         Config {
-            width: f[0],
-            height: f[1],
-            grid_cols: f[2] as u32,
-            grid_rows: f[3] as u32,
-            nutrient_capacity: f[4],
-            regrow_rate: f[5],
-            diffuse_every: f[6] as u32,
-            diffuse_k: f[7],
-            plant_cost: f[8],
-            plant_energy: f[9],
-            plant_spawn_rate: f[10],
-            plant_radius: f[11],
-            max_plants: f[12] as u32,
-            max_creatures: f[13] as u32,
-            initial_creatures: f[14] as u32,
-            initial_plants: f[15] as u32,
-            basal_cost: f[16],
-            move_cost: f[17],
-            sense_cost: f[18],
-            max_turn: f[19],
-            bite_damage: f[20],
-            bite_cost: f[21],
-            bite_size_ratio: f[22],
-            corpse_return: f[23],
-            child_share: f[24],
-            spatial_cell: f[25],
-            history_cap: f[26] as u32,
-            history_every: f[27] as u32,
-            min_population: f[28] as u32,
+            width: next(),
+            height: next(),
+            grid_cols: next() as u32,
+            grid_rows: next() as u32,
+            nutrient_capacity: next(),
+            regrow_rate: next(),
+            diffuse_every: next() as u32,
+            diffuse_k: next(),
+            plant_cost: next(),
+            plant_max_energy: next(),
+            plant_growth: next(),
+            graze_bite: next(),
+            plant_spawn_rate: next(),
+            plant_radius: next(),
+            max_plants: next() as u32,
+            max_creatures: next() as u32,
+            initial_creatures: next() as u32,
+            initial_plants: next() as u32,
+            basal_cost: next(),
+            move_cost: next(),
+            sense_cost: next(),
+            max_turn: next(),
+            bite_damage: next(),
+            bite_cost: next(),
+            bite_size_ratio: next(),
+            bite_reach: next(),
+            corpse_return: next(),
+            child_share: next(),
+            spatial_cell: next(),
+            history_cap: next() as u32,
+            history_every: next() as u32,
+            min_population: next() as u32,
+            terrain_contrast: next(),
         }
     }
 }
@@ -306,10 +334,12 @@ impl World {
     pub fn new(seed: u32, cfg: Config) -> World {
         let mut w = World::empty(seed, cfg);
         let mut rng = Rng::new(seed);
+        w.lay_terrain(&mut rng);
         for _ in 0..w.cfg.initial_plants {
             let x = rng.range(0.0, w.cfg.width);
             let y = rng.range(0.0, w.cfg.height);
-            w.plants.spawn(x, y, w.cfg.plant_energy);
+            let e = rng.range(w.cfg.plant_cost, w.cfg.plant_max_energy);
+            w.plants.spawn(x, y, e);
         }
         for _ in 0..w.cfg.initial_creatures {
             let g = Genome::random(&mut rng);
@@ -323,6 +353,54 @@ impl World {
         }
         w.rng = rng;
         w
+    }
+
+    /// Soil fertility from two octaves of seeded value noise on the torus.
+    /// Fertile patches and barren ground give creatures somewhere to go.
+    fn lay_terrain(&mut self, rng: &mut Rng) {
+        let cols = self.nutrients.cols;
+        let rows = self.nutrients.rows;
+        let contrast = self.cfg.terrain_contrast.clamp(0.0, 1.0);
+        let cap = self.cfg.nutrient_capacity;
+        // Lattices of random values; interpolated with a smoothstep.
+        let lattice = |rng: &mut Rng, n: usize| -> Vec<f32> { (0..n * n).map(|_| rng.next_f32()).collect() };
+        let coarse_n = 6usize;
+        let fine_n = 14usize;
+        let coarse = lattice(rng, coarse_n);
+        let fine = lattice(rng, fine_n);
+        let sample = |lat: &[f32], n: usize, u: f32, v: f32| -> f32 {
+            let fu = u * n as f32;
+            let fv = v * n as f32;
+            let i0 = (fu as usize) % n;
+            let j0 = (fv as usize) % n;
+            let i1 = (i0 + 1) % n;
+            let j1 = (j0 + 1) % n;
+            let tu = fu - fu.floor();
+            let tv = fv - fv.floor();
+            let su = tu * tu * (3.0 - 2.0 * tu);
+            let sv = tv * tv * (3.0 - 2.0 * tv);
+            let a = lat[j0 * n + i0];
+            let b = lat[j0 * n + i1];
+            let c = lat[j1 * n + i0];
+            let d = lat[j1 * n + i1];
+            let top = a + (b - a) * su;
+            let bot = c + (d - c) * su;
+            top + (bot - top) * sv
+        };
+        for j in 0..rows {
+            for i in 0..cols {
+                let u = (i as f32 + 0.5) / cols as f32;
+                let v = (j as f32 + 0.5) / rows as f32;
+                let n = 0.65 * sample(&coarse, coarse_n, u, v) + 0.35 * sample(&fine, fine_n, u, v);
+                // Stretch the middle so roughly a third of the ground is poor.
+                let t = ((n - 0.35) / 0.35).clamp(0.0, 1.0);
+                let patchy = 0.04 + 0.96 * t * t;
+                let f = 1.0 + (patchy - 1.0) * contrast;
+                let idx = j * cols + i;
+                self.nutrients.capacity[idx] = cap * f;
+                self.nutrients.level[idx] = cap * f * 0.5;
+            }
+        }
     }
 
     /// Allocated but unpopulated; used by `new` and by snapshot restore.
@@ -374,23 +452,42 @@ impl World {
         if self.tick % cfg.diffuse_every == 0 {
             self.nutrients.diffuse(cfg.diffuse_k);
         }
+        // Bushes draw nutrients up from their cell until full. A bush grazed
+        // to nothing lingers a little, then dies and frees its slot.
+        let p = &mut self.plants;
+        for i in 0..p.capacity() {
+            if !p.alive[i] {
+                continue;
+            }
+            let cell = self.nutrients.cell_at(p.x[i], p.y[i]);
+            let room = cfg.plant_max_energy - p.energy[i];
+            if room > 0.0 {
+                let pull = cfg.plant_growth.min(room).min(self.nutrients.level[cell]).max(0.0);
+                p.energy[i] += pull;
+                self.nutrients.level[cell] -= pull;
+            }
+            if p.energy[i] < 0.5 && self.rng.chance(0.02) {
+                p.kill(i as u32);
+            }
+        }
+        // Seedlings sprout where the soil is rich.
         let cols = self.nutrients.cols;
         let (cw, ch) = (self.nutrients.cell_w, self.nutrients.cell_h);
         for i in 0..self.nutrients.level.len() {
-            if self.plants.is_full() {
+            if p.is_full() {
                 break;
             }
             let level = self.nutrients.level[i];
             if level < cfg.plant_cost {
                 continue;
             }
-            let p = cfg.plant_spawn_rate * level / self.nutrients.capacity[i];
-            if self.rng.chance(p) {
+            let prob = cfg.plant_spawn_rate * level / self.nutrients.capacity[i];
+            if self.rng.chance(prob) {
                 let cx = (i % cols) as f32 * cw;
                 let cy = (i / cols) as f32 * ch;
                 let x = cx + self.rng.next_f32() * cw;
                 let y = cy + self.rng.next_f32() * ch;
-                if self.plants.spawn(x, y, cfg.plant_energy).is_some() {
+                if p.spawn(x, y, cfg.plant_cost).is_some() {
                     self.nutrients.level[i] = level - cfg.plant_cost;
                 }
             }
@@ -488,28 +585,36 @@ impl World {
             let mut energy = c.energy[i] - cost;
             c.age[i] += 1.0;
 
-            // Eat a plant we are touching.
+            // Graze a bush we are touching.
             if let Some(hit) = plant_hit {
+                let pi = hit.index as usize;
                 let reach = radius + cfg.plant_radius;
-                if hit.dist2 <= reach * reach && plants.alive[hit.index as usize] {
-                    let gain = plants.energy[hit.index as usize] * (1.0 - g.diet);
-                    plants.kill(hit.index);
-                    energy = (energy + gain).min(max_e);
+                if hit.dist2 <= reach * reach && plants.alive[pi] && plants.energy[pi] > 0.0 {
+                    let take = cfg.graze_bite.min(plants.energy[pi]);
+                    plants.energy[pi] -= take;
+                    energy = (energy + take * (1.0 - g.diet)).min(max_e);
                     c.meals[i] += 1;
                 }
             }
-            // Bite a smaller neighbour if the brain says so.
+            // Bite a smaller neighbour if the brain says so. Jaws scale with
+            // diet: a grazer's nip is weak and nearly free, a hunter's bite
+            // is costly and brutal. That keeps biting selectively neutral for
+            // herbivores, so the path to predation has no fitness valley.
             if out[brain::OUT_BITE] > 0.0 {
                 if let Some(hit) = other_hit {
                     let j = hit.index as usize;
-                    let reach = radius + c.radius[j];
+                    let reach = (radius + c.radius[j]) * cfg.bite_reach;
                     if hit.dist2 <= reach * reach && c.size[j] <= size * cfg.bite_size_ratio && c.alive[j] {
-                        energy -= cfg.bite_cost;
-                        let dmg = (cfg.bite_damage * size).min(c.energy[j].max(0.0));
+                        // Meat digestion is concave in diet (sqrt), so the
+                        // first steps toward predation already pay for themselves.
+                        let jaw = g.diet.sqrt();
+                        energy -= cfg.bite_cost * jaw;
+                        let dmg = (cfg.bite_damage * size * jaw).min(c.energy[j].max(0.0));
                         c.energy[j] -= dmg;
-                        energy = (energy + dmg * g.diet).min(max_e);
+                        energy = (energy + dmg * jaw).min(max_e);
                         if dmg > 0.0 {
                             c.meals[i] += 1;
+                            self.tally.bites += 1;
                         }
                     }
                 }
@@ -654,6 +759,7 @@ impl World {
         row[stats::F_MEAN_DIET] = s_diet * inv;
         row[stats::F_NUTRIENTS] = self.nutrients.total();
         row[stats::F_GENERATION] = max_gen as f32;
+        row[stats::F_BITES] = self.tally.bites as f32;
         self.history.push(&row);
         self.tally = Tally::default();
     }
@@ -744,6 +850,19 @@ mod tests {
             assert!(now <= prev + 1e-2, "energy rose {prev} -> {now}");
             prev = now;
         }
+    }
+
+    #[test]
+    fn pick_finds_a_creature_near_its_position() {
+        let mut w = World::new(4, small());
+        w.step(50);
+        let c = &w.creatures;
+        let i = (0..c.capacity()).find(|&i| c.alive[i]).expect("someone alive");
+        let (x, y) = (c.x[i], c.y[i]);
+        let got = w.pick(x + 1.0, y - 1.0, 12.0).expect("pick");
+        let d2 = (w.creatures.x[got as usize] - x).powi(2) + (w.creatures.y[got as usize] - y).powi(2);
+        assert!(d2 <= 4.0 + 1e-3, "picked something {d2} away");
+        assert!(w.pick(x + 500.0, y, 3.0).is_none() || w.population() > 1000);
     }
 
     #[test]
