@@ -75,9 +75,9 @@ export class Renderer {
       for (let i = 0; i < cols * rows; i++) {
         const t = Math.min(1, level[i] / cap);
         // Dark water to a faint mineral teal; stays quiet under the life on top.
-        px[i * 4] = 10 + 14 * t;
-        px[i * 4 + 1] = 18 + 48 * t;
-        px[i * 4 + 2] = 25 + 46 * t;
+        px[i * 4] = 10 + 16 * t;
+        px[i * 4 + 1] = 18 + 62 * t;
+        px[i * 4 + 2] = 25 + 54 * t;
         px[i * 4 + 3] = 255;
       }
       this.fieldCtx.putImageData(this.fieldImage, 0, 0);
