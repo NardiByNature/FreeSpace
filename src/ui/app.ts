@@ -3,6 +3,7 @@ import { Renderer } from "../render/renderer.js";
 import { Core, Sim } from "../wasm.js";
 import { Charts } from "./charts.js";
 import { Inspector } from "./inspector.js";
+import { Timeline, TimelineView } from "./timeline.js";
 
 const FRAME_BUDGET_MS = 13;
 /** Simulation ticks per second at 1x, independent of display refresh rate. */
@@ -22,6 +23,9 @@ export class App {
   private readonly renderer: Renderer;
   private readonly inspector: Inspector;
   private readonly charts: Charts;
+  readonly timeline = new Timeline();
+  private readonly timelineView: TimelineView;
+  private toastTimer = 0;
   private playing = true;
   /** Ticks per frame; 0 means as many as fit the budget. */
   private speed = 1;
@@ -54,6 +58,9 @@ export class App {
       this.follow = on;
     };
     this.charts = new Charts($<HTMLCanvasElement>("popchart"), $<HTMLCanvasElement>("huechart"), $<HTMLCanvasElement>("approachchart"));
+    this.timelineView = new TimelineView($<HTMLCanvasElement>("timeline"), this.timeline);
+    this.timelineView.onRewind = (i) => this.rewind(i);
+    this.timeline.reset(this.sim);
     this.els.seed.value = String(seed);
     this.bindControls();
     this.bindCanvas();
@@ -85,17 +92,56 @@ export class App {
     this.charts.draw(this.core, this.sim, true);
   }
 
-  private newWorld(seed: number): void {
-    this.sim.free();
-    this.sim = new Sim(seed);
-    this.cam = new Camera(this.sim.width(), this.sim.height());
-    this.cam.resize(this.canvas.clientWidth, this.canvas.clientHeight);
-    this.cam.fit();
+  /** Swap in a new simulation handle; `keepView` preserves camera and timeline (rewind). */
+  private replaceSim(next: Sim, keepView: boolean): void {
+    const old = this.sim;
+    this.sim = next;
+    old.free();
+    if (!keepView) {
+      this.cam = new Camera(this.sim.width(), this.sim.height());
+      this.cam.resize(this.canvas.clientWidth, this.canvas.clientHeight);
+      this.cam.fit();
+      this.timeline.reset(this.sim);
+    }
     this.selectedSlot = -1;
     this.inspector.reset();
-    this.els.seed.value = String(seed);
+    this.els.seed.value = String(this.sim.seed());
     this.tpsWindow = [];
-    history.replaceState(null, "", `#seed=${seed}`);
+    this.tickDebt = 0;
+    history.replaceState(null, "", `#seed=${this.sim.seed()}`);
+  }
+
+  private newWorld(seed: number): void {
+    this.replaceSim(new Sim(seed), false);
+  }
+
+  /** Rewind to checkpoint `index`. The world then replays identically unless touched. */
+  rewind(index: number): void {
+    const cp = this.timeline.take(index);
+    if (!cp) return;
+    let next: Sim;
+    try {
+      next = Sim.restore(cp.bytes);
+    } catch (err) {
+      this.toast(`Could not rewind: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+    this.replaceSim(next, true);
+    this.toast(`Rewound to t ${cp.tick.toLocaleString()}. Left alone, the future replays exactly; touch anything and it branches.`);
+  }
+
+  private toast(text: string): void {
+    const el = $("toast");
+    el.textContent = text;
+    el.hidden = false;
+    el.classList.remove("fade");
+    window.clearTimeout(this.toastTimer);
+    this.toastTimer = window.setTimeout(() => {
+      el.classList.add("fade");
+      this.toastTimer = window.setTimeout(() => {
+        el.hidden = true;
+      }, 700);
+    }, 6000);
   }
 
   private bindControls(): void {
@@ -129,6 +175,13 @@ export class App {
         this.inspector.reset();
       } else if (e.key === "f") {
         this.cam.fit();
+      } else if (e.key === "[") {
+        const i = this.timeline.previousIndex(this.sim.tick());
+        if (i >= 0) this.rewind(i);
+      } else if (e.key === "]") {
+        // After a rewind the future is discarded, so there is nothing to step to;
+        // the key exists so the pair feels complete and for a future branch list.
+        this.toast("Nothing ahead of now. Let it run.");
       }
     });
   }
@@ -211,15 +264,7 @@ export class App {
       alert(`Could not load snapshot: ${err instanceof Error ? err.message : String(err)}`);
       return;
     }
-    this.sim.free();
-    this.sim = next;
-    this.cam = new Camera(this.sim.width(), this.sim.height());
-    this.cam.resize(this.canvas.clientWidth, this.canvas.clientHeight);
-    this.cam.fit();
-    this.selectedSlot = -1;
-    this.inspector.reset();
-    this.els.seed.value = String(this.sim.seed());
-    this.tpsWindow = [];
+    this.replaceSim(next, false);
   }
 
   private stepFrame(now: number): void {
@@ -249,7 +294,9 @@ export class App {
 
   private loop(): void {
     this.frame++;
+    const before = this.sim.tick();
     this.stepFrame(performance.now());
+    if (this.sim.tick() !== before) this.timeline.maybeCapture(this.sim);
     this.sim.sync();
 
     // Selection bookkeeping: slots are recycled, so confirm the id still matches.
@@ -287,6 +334,7 @@ export class App {
     }
     if (this.frame % 8 === 0) {
       this.charts.draw(this.core, this.sim);
+      this.timelineView.draw(this.sim);
       this.updateReadouts();
     }
     requestAnimationFrame(() => this.loop());

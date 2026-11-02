@@ -14,7 +14,12 @@
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); overflow: hidden; }
-#app { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr) 132px; }
+#app { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr) 30px 132px; }
+#strip { position: relative; background: var(--panel); border-top: 1px solid var(--line); }
+#timeline { display: block; width: 100%; height: 100%; }
+#toast { position: absolute; left: 50%; bottom: 38px; transform: translateX(-50%); background: #182230; border: 1px solid #33455a; color: var(--text); padding: 8px 14px; border-radius: 8px; font-size: 12px; white-space: nowrap; box-shadow: 0 6px 24px rgba(0,0,0,0.4); pointer-events: none; opacity: 1; transition: opacity 0.6s; }
+#toast[hidden] { display: none; }
+#toast.fade { opacity: 0; }
 
 #bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 6px 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
 .brand { font-weight: 650; letter-spacing: 0.02em; color: var(--accent); margin-right: 6px; }
