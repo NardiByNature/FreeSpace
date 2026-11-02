@@ -12,6 +12,7 @@ const TRAIT_RANGES: [number, number][] = [
   [0, 1], // diet
   [0.4, 0.95], // breed at
   [0.005, 0.2], // mutation
+  [0, 1], // mate pref
 ];
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -32,6 +33,7 @@ export class Inspector {
   followBox: HTMLInputElement | null = null;
   onFollowChange: ((on: boolean) => void) | null = null;
   onSpawnCode: ((code: string, name: string) => void) | null = null;
+  onSelectSlot: ((slot: number) => void) | null = null;
   private currentSlot = -1;
   private currentSim: Sim | null = null;
 
@@ -58,6 +60,11 @@ export class Inspector {
     set("diet", h[r + F.meanDiet].toFixed(2));
     const cap = sim.nutrient_capacity() * sim.grid_cols() * sim.grid_rows();
     set("soil", `${Math.round((h[r + F.nutrients] / cap) * 100)}%`);
+    set("rules", sim.sexual() ? `seed ${sim.seed()} · sexual, mate choice by colour` : `seed ${sim.seed()} · budding`);
+    set("pref", sim.sexual() ? `${h[r + F.meanPref].toFixed(2)} (hybrids ${h[r + F.hybrids]})` : "–");
+    set("oldest", `${Math.round(h[r + F.oldest]).toLocaleString()} ticks`);
+    set("meals", `${h[r + F.mostMeals]}`);
+    set("gen", `${h[r + F.generation]}`);
     this.updateChronicle(sim);
   }
 
@@ -101,6 +108,10 @@ export class Inspector {
       ),
     );
     this.root.append(el("p", undefined, "Click a creature to watch its brain. Drag to pan, scroll to zoom, space to pause."));
+    const rules = el("p", undefined, "");
+    rules.style.color = "var(--accent)";
+    this.vals.set("rules", rules);
+    this.root.append(rules);
     this.root.append(el("h3", undefined, "Right now"));
     const kv = el("div", "kv");
     const add = (k: string, label: string) => {
@@ -128,7 +139,25 @@ export class Inspector {
     add2("speed", "speed");
     add2("sense", "sense range");
     add2("diet", "diet (0 plant … 1 meat)");
+    add2("pref", "mate choosiness");
     this.root.append(kv2);
+    this.root.append(el("h3", undefined, "Hall of fame"));
+    const fame = el("div", "fame");
+    const champ = (k: string, label: string, kind: number) => {
+      const row = el("div", "champ");
+      row.append(el("span", "n", label));
+      const v = el("span", "v", "–");
+      this.vals.set(k, v);
+      const btn = el("button", undefined, "find");
+      btn.title = "Select the current record holder";
+      btn.addEventListener("click", () => this.onSelectSlot?.(kind));
+      row.append(v, btn);
+      fame.append(row);
+    };
+    champ("oldest", "oldest living", 0);
+    champ("meals", "most meals", 1);
+    champ("gen", "highest generation", 2);
+    this.root.append(fame);
     this.root.append(el("h3", undefined, "Chronicle"));
     const list = el("div", "chronicle");
     this.root.append(list);
@@ -169,6 +198,8 @@ export class Inspector {
       const v = d[L.iTraits + t];
       const [lo, hi] = TRAIT_RANGES[t] ?? [0, 1];
       set(`t${t}`, t === 2 ? v.toFixed(0) : v.toFixed(t === 6 ? 3 : 2));
+      const row = this.bars.get(`t${t}`)?.parentElement?.parentElement;
+      if (row && t === 7) row.style.display = sim.sexual() ? "" : "none";
       bar(`t${t}`, (v - lo) / (hi - lo));
     }
     const diet = d[L.iTraits + 4];

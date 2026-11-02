@@ -10,8 +10,9 @@ function seedFromHash(): number {
 async function main(): Promise<void> {
   const core = await Core.load();
   const seed = seedFromHash();
-  history.replaceState(null, "", `#seed=${seed}`);
-  new App(core, seed);
+  const sexual = /(^|[#&])sexual(?:=(?:1|true))?(&|$)/.test(location.hash);
+  history.replaceState(null, "", `#seed=${seed}${sexual ? "&sexual" : ""}`);
+  new App(core, seed, sexual);
 }
 
 main().catch((err: unknown) => {

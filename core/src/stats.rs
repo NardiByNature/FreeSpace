@@ -20,7 +20,11 @@ pub const F_MEAN_DIET: usize = 12;
 pub const F_NUTRIENTS: usize = 13;
 pub const F_GENERATION: usize = 14;
 pub const F_BITES: usize = 15;
-pub const N_FIELDS: usize = 16;
+pub const F_MEAN_PREF: usize = 16;
+pub const F_HYBRIDS: usize = 17;
+pub const F_OLDEST: usize = 18;
+pub const F_MOST_MEALS: usize = 19;
+pub const N_FIELDS: usize = 20;
 pub const SAMPLE_STRIDE: usize = N_FIELDS + HUE_BINS;
 
 /// Accumulated during a tick, folded into a sample every `every` ticks.
@@ -30,6 +34,8 @@ pub struct Tally {
     pub deaths: u32,
     pub bites: u32,
     pub washed: u32,
+    /// Sexual births whose parents differed in hue by more than 0.1.
+    pub hybrids: u32,
     pub approach_sum: f32,
     pub approach_n: u32,
 }
@@ -77,6 +83,10 @@ pub struct Chronicle {
     pub gen_milestone: u32,
     pub bin_peak: [f32; HUE_BINS],
     pub bin_dominant: [bool; HUE_BINS],
+    /// Consecutive samples with two major colour bands separated by empty bins.
+    pub split_streak: u32,
+    pub split_announced: bool,
+    pub split_quiet: u32,
 }
 
 impl Default for Chronicle {
@@ -94,8 +104,36 @@ impl Default for Chronicle {
             gen_milestone: 0,
             bin_peak: [0.0; HUE_BINS],
             bin_dominant: [false; HUE_BINS],
+            split_streak: 0,
+            split_announced: false,
+            split_quiet: 0,
         }
     }
+}
+
+/// Two hue bins both holding at least 15% of the population with every bin
+/// on the shorter arc between them under 1%: the signature of lineages that
+/// have stopped mixing. Returns the pair's bin indices.
+pub fn find_split(row: &[f32], pop: f32) -> Option<(usize, usize)> {
+    if pop <= 0.0 {
+        return None;
+    }
+    let share = |b: usize| row[N_FIELDS + (b % HUE_BINS)] / pop;
+    let majors: Vec<usize> = (0..HUE_BINS).filter(|&b| share(b) >= 0.15).collect();
+    for (i, &a) in majors.iter().enumerate() {
+        for &b in &majors[i + 1..] {
+            let forward = b - a; // walking up from a to b
+            let backward = HUE_BINS - forward;
+            let (start, len) = if forward <= backward { (a, forward) } else { (b, backward) };
+            if len < 2 {
+                continue;
+            }
+            if (1..len).all(|k| share(start + k) < 0.01) {
+                return Some((a, b));
+            }
+        }
+    }
+    None
 }
 
 impl Chronicle {
@@ -156,6 +194,25 @@ impl Chronicle {
         if gen / 100 > self.gen_milestone {
             self.gen_milestone = gen / 100;
             self.push(tick, EV_GENERATION, (self.gen_milestone * 100) as f32, 0.0);
+        }
+
+        match find_split(row, pop) {
+            Some((a, b)) => {
+                self.split_streak += 1;
+                self.split_quiet = 0;
+                if self.split_streak >= 100 && !self.split_announced {
+                    self.split_announced = true;
+                    let hue = |bin: usize| (bin as f32 + 0.5) / HUE_BINS as f32;
+                    self.push(tick, EV_SPECIATION, hue(a), hue(b));
+                }
+            }
+            None => {
+                self.split_streak = 0;
+                self.split_quiet += 1;
+                if self.split_quiet >= 300 {
+                    self.split_announced = false;
+                }
+            }
         }
 
         if pop > 0.0 {
@@ -238,6 +295,32 @@ mod tests {
         assert_eq!(c.total, EVENT_CAP as u32 + 10);
         assert_eq!(c.event(0).tick, 10);
         assert_eq!(c.event(c.len - 1).tick, EVENT_CAP as u32 + 9);
+    }
+
+    #[test]
+    fn speciation_needs_two_separated_bands_for_a_while() {
+        let mut h = History::new(512, 10);
+        let mut c = Chronicle::default();
+        let mut row = [0.0f32; SAMPLE_STRIDE];
+        row[F_POP] = 100.0;
+        row[N_FIELDS + 4] = 50.0;
+        row[N_FIELDS + 5] = 50.0; // adjacent bins: one band, not a split
+        for t in 0..120 {
+            row[F_TICK] = t as f32 * 10.0;
+            h.push(&row);
+            c.observe(&h, 0);
+        }
+        assert!(!(0..c.len).any(|i| c.event(i).kind == EV_SPECIATION));
+        row[N_FIELDS + 5] = 0.0;
+        row[N_FIELDS + 20] = 50.0; // far apart with empty bins between
+        for t in 120..240 {
+            row[F_TICK] = t as f32 * 10.0;
+            h.push(&row);
+            c.observe(&h, 0);
+        }
+        let ev: Vec<Event> = (0..c.len).map(|i| c.event(i)).filter(|e| e.kind == EV_SPECIATION).collect();
+        assert_eq!(ev.len(), 1);
+        assert!((ev[0].a - 4.5 / HUE_BINS as f32).abs() < 1e-6);
     }
 
     #[test]

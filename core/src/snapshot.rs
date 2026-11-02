@@ -7,7 +7,7 @@ use crate::stats::{HUE_BINS, SAMPLE_STRIDE};
 use crate::world::{Config, World};
 
 pub const MAGIC: &[u8; 4] = b"TDPL";
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 
 struct Writer {
     buf: Vec<u8>,
@@ -97,6 +97,7 @@ impl World {
         w.u32(self.tally.deaths);
         w.u32(self.tally.bites);
         w.u32(self.tally.washed);
+        w.u32(self.tally.hybrids);
         w.f32(self.tally.approach_sum);
         w.u32(self.tally.approach_n);
 
@@ -130,6 +131,7 @@ impl World {
                 w.f32(c.age[i]);
                 w.u32(c.generation[i]);
                 w.u32(c.meals[i]);
+                w.f32(c.ready_ticks[i]);
                 w.f32s(&c.genome[i].traits());
                 w.f32s(&c.genome[i].weights);
                 w.f32s(&c.inputs[i]);
@@ -159,6 +161,9 @@ impl World {
         for d in c.bin_dominant {
             w.u8(d as u8);
         }
+        w.u32(c.split_streak);
+        w.u8(c.split_announced as u8);
+        w.u32(c.split_quiet);
         w.u32(c.len as u32);
         for i in 0..c.len {
             let e = c.event(i);
@@ -195,6 +200,7 @@ impl World {
         w.tally.deaths = r.u32()?;
         w.tally.bites = r.u32()?;
         w.tally.washed = r.u32()?;
+        w.tally.hybrids = r.u32()?;
         w.tally.approach_sum = r.f32()?;
         w.tally.approach_n = r.u32()?;
 
@@ -238,6 +244,7 @@ impl World {
                 c.age[i] = r.f32()?;
                 c.generation[i] = r.u32()?;
                 c.meals[i] = r.u32()?;
+                c.ready_ticks[i] = r.f32()?;
                 let mut traits = [0.0f32; Genome::N_TRAITS];
                 r.f32s(&mut traits)?;
                 let mut weights = [0.0f32; N_W];
@@ -284,6 +291,9 @@ impl World {
         for b in 0..HUE_BINS {
             c.bin_dominant[b] = r.u8()? != 0;
         }
+        c.split_streak = r.u32()?;
+        c.split_announced = r.u8()? != 0;
+        c.split_quiet = r.u32()?;
         let n = r.u32()? as usize;
         if n > crate::stats::EVENT_CAP {
             return Err("too many events in snapshot".into());

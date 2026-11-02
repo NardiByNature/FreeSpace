@@ -28,13 +28,15 @@ fn main() {
             "corpse" => cfg.corpse_return = f,
             "terrain" => cfg.terrain_contrast = f,
             "reach" => cfg.bite_reach = f,
+            "sexual" => cfg.sexual = f > 0.5,
+            "solo" => cfg.solo_after = f,
             other => panic!("unknown override {other}"),
         }
     }
     let mut w = World::new(seed, cfg);
     println!("seed {seed}  world {}x{}  founders {}", w.cfg.width, w.cfg.height, w.cfg.initial_creatures);
-    println!("{:>6} {:>6} {:>6} {:>5} {:>5} {:>5} {:>7} {:>6} {:>6} {:>5} {:>4} {:>8} {:>5} {:>7}",
-        "tick", "pop", "plants", "herb", "omni", "carn", "apprch", "sense", "speed", "diet", "gen", "nutr", "bites", "tps");
+    println!("{:>6} {:>6} {:>6} {:>5} {:>5} {:>5} {:>7} {:>6} {:>6} {:>5} {:>4} {:>8} {:>5} {:>5} {:>5} {:>5} {:>7}",
+        "tick", "pop", "plants", "herb", "omni", "carn", "apprch", "sense", "speed", "diet", "gen", "nutr", "bites", "pref", "hybr", "bands", "tps");
     let start = Instant::now();
     let mut last = Instant::now();
     let mut done = 0u32;
@@ -45,9 +47,16 @@ fn main() {
         let dt = last.elapsed().as_secs_f64();
         last = Instant::now();
         let r = w.history.latest().unwrap();
-        println!("{:>6} {:>6} {:>6} {:>5} {:>5} {:>5} {:>7.3} {:>6.1} {:>6.2} {:>5.2} {:>4} {:>8.0} {:>5} {:>7.0}",
+        // Colour bands: contiguous runs of hue bins each holding at least 2% of the population.
+        let pop = r[F_POP].max(1.0);
+        let occupied: Vec<bool> = (0..HUE_BINS).map(|b| r[N_FIELDS + b] / pop >= 0.02).collect();
+        let mut bands = (0..HUE_BINS).filter(|&b| occupied[b] && !occupied[(b + HUE_BINS - 1) % HUE_BINS]).count();
+        if bands == 0 && occupied.iter().any(|o| *o) {
+            bands = 1;
+        }
+        println!("{:>6} {:>6} {:>6} {:>5} {:>5} {:>5} {:>7.3} {:>6.1} {:>6.2} {:>5.2} {:>4} {:>8.0} {:>5} {:>5.2} {:>5} {:>5} {:>7.0}",
             r[F_TICK], r[F_POP], r[F_PLANTS], r[F_HERB], r[F_OMNI], r[F_CARN], r[F_APPROACH],
-            r[F_MEAN_SENSE], r[F_MEAN_SPEED], r[F_MEAN_DIET], r[F_GENERATION], r[F_NUTRIENTS], r[F_BITES], n as f64 / dt);
+            r[F_MEAN_SENSE], r[F_MEAN_SPEED], r[F_MEAN_DIET], r[F_GENERATION], r[F_NUTRIENTS], r[F_BITES], r[F_MEAN_PREF], r[F_HYBRIDS], bands, n as f64 / dt);
     }
     let total = start.elapsed().as_secs_f64();
     println!("{ticks} ticks in {total:.2}s = {:.0} ticks/s", ticks as f64 / total);

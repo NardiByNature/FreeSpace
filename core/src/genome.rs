@@ -33,6 +33,9 @@ pub struct Genome {
     /// Fraction of max energy at which the creature splits.
     pub reproduce_at: f32,
     pub mutation_rate: f32,
+    /// How alike in colour a partner must be (sexual worlds only).
+    /// 0 accepts anyone; near 1 accepts only a near-identical hue.
+    pub mate_pref: f32,
     pub weights: [f32; N_W],
 }
 
@@ -74,6 +77,54 @@ impl Genome {
             diet: rng.range(0.0, 0.3),
             reproduce_at: rng.range(0.6, 0.85),
             mutation_rate: rng.range(0.02, 0.08),
+            mate_pref: rng.range(0.0, 0.5),
+            weights,
+        }
+    }
+
+    /// Would a creature with this genome accept `other` as a mate?
+    #[inline]
+    pub fn accepts(&self, other: &Genome) -> bool {
+        let tol = 1.0 - self.mate_pref;
+        crate::fastmath::hue_distance(self.hue, other.hue) <= 0.5 * tol * tol
+    }
+
+    /// Recombine two parents. The brain has structure, so each hidden unit
+    /// travels as a block (its input weights plus its output weights) from
+    /// one parent; output biases come from one parent each. Traits pick a
+    /// parent at random, except hue, which is the circular midpoint so colour
+    /// behaves like a blended quantitative trait.
+    pub fn crossover(a: &Genome, b: &Genome, rng: &mut Rng) -> Genome {
+        let pick = |rng: &mut Rng, x: f32, y: f32| if rng.chance(0.5) { x } else { y };
+        let mut weights = [0.0f32; N_W];
+        let out_base = N_IN * N_HID;
+        for h in 0..N_HID {
+            let src = if rng.chance(0.5) { a } else { b };
+            weights[h * N_IN..(h + 1) * N_IN].copy_from_slice(&src.weights[h * N_IN..(h + 1) * N_IN]);
+            for o in 0..N_OUT {
+                let k = out_base + o * (N_HID + 1) + h;
+                weights[k] = src.weights[k];
+            }
+        }
+        for o in 0..N_OUT {
+            let k = out_base + o * (N_HID + 1) + N_HID;
+            weights[k] = pick(rng, a.weights[k], b.weights[k]);
+        }
+        let mut d = b.hue - a.hue;
+        if d > 0.5 {
+            d -= 1.0;
+        } else if d < -0.5 {
+            d += 1.0;
+        }
+        Genome {
+            size: pick(rng, a.size, b.size),
+            speed: pick(rng, a.speed, b.speed),
+            sense_range: pick(rng, a.sense_range, b.sense_range),
+            hue: wrap01(a.hue + d * 0.5),
+            diet: pick(rng, a.diet, b.diet),
+            reproduce_at: pick(rng, a.reproduce_at, b.reproduce_at),
+            mutation_rate: pick(rng, a.mutation_rate, b.mutation_rate),
+            mate_pref: pick(rng, a.mate_pref, b.mate_pref),
             weights,
         }
     }
@@ -91,6 +142,7 @@ impl Genome {
         child.diet = clamp(self.diet + rng.gaussian() * 0.03 * k, 0.0, 1.0);
         child.reproduce_at = clamp(self.reproduce_at + rng.gaussian() * 0.02 * k, REPRO_MIN, REPRO_MAX);
         child.mutation_rate = clamp(self.mutation_rate * (1.0 + rng.gaussian() * 0.1), MUT_MIN, MUT_MAX);
+        child.mate_pref = clamp(self.mate_pref + rng.gaussian() * 0.04 * k, 0.0, 1.0);
         for w in child.weights.iter_mut() {
             // Most weights are left alone; a few get nudged; rarely one is reset.
             let roll = rng.next_f32();
@@ -112,6 +164,7 @@ impl Genome {
         self.diet = clamp(self.diet, 0.0, 1.0);
         self.reproduce_at = clamp(self.reproduce_at, REPRO_MIN, REPRO_MAX);
         self.mutation_rate = clamp(self.mutation_rate, MUT_MIN, MUT_MAX);
+        self.mate_pref = clamp(self.mate_pref, 0.0, 1.0);
         for w in self.weights.iter_mut() {
             *w = clamp(*w, -W_LIMIT, W_LIMIT);
         }
@@ -133,7 +186,7 @@ impl Genome {
     }
 
     /// Flat trait vector for snapshots and the inspector.
-    pub const N_TRAITS: usize = 7;
+    pub const N_TRAITS: usize = 8;
     pub fn traits(&self) -> [f32; Self::N_TRAITS] {
         [
             self.size,
@@ -143,6 +196,7 @@ impl Genome {
             self.diet,
             self.reproduce_at,
             self.mutation_rate,
+            self.mate_pref,
         ]
     }
     pub fn from_parts(t: [f32; Self::N_TRAITS], weights: [f32; N_W]) -> Genome {
@@ -154,6 +208,7 @@ impl Genome {
             diet: t[4],
             reproduce_at: t[5],
             mutation_rate: t[6],
+            mate_pref: t[7],
             weights,
         }
     }
@@ -177,6 +232,7 @@ mod tests {
             assert!((0.0..=1.0).contains(&g.diet));
             assert!((REPRO_MIN..=REPRO_MAX).contains(&g.reproduce_at));
             assert!((MUT_MIN..=MUT_MAX).contains(&g.mutation_rate));
+            assert!((0.0..=1.0).contains(&g.mate_pref));
             for w in g.weights {
                 assert!(w.abs() <= W_LIMIT);
             }
@@ -190,6 +246,45 @@ mod tests {
         let c = g.mutate(&mut rng);
         let changed = g.weights.iter().zip(c.weights.iter()).filter(|(a, b)| a != b).count();
         assert!(changed > 0 && changed < N_W / 2, "changed {changed}");
+    }
+
+    #[test]
+    fn crossover_takes_blocks_from_parents() {
+        let mut rng = Rng::new(10);
+        let a = Genome::random(&mut rng);
+        let b = Genome::random(&mut rng);
+        for _ in 0..50 {
+            let c = Genome::crossover(&a, &b, &mut rng);
+            for i in 0..N_W {
+                assert!(c.weights[i] == a.weights[i] || c.weights[i] == b.weights[i], "weight {i} from nowhere");
+            }
+            // Each hidden unit's input row is wholly from one parent.
+            for h in 0..N_HID {
+                let row = &c.weights[h * N_IN..(h + 1) * N_IN];
+                let from_a = row == &a.weights[h * N_IN..(h + 1) * N_IN];
+                let from_b = row == &b.weights[h * N_IN..(h + 1) * N_IN];
+                assert!(from_a || from_b);
+            }
+            assert!(c.size == a.size || c.size == b.size);
+            assert!(c.diet == a.diet || c.diet == b.diet);
+            assert!((0.0..1.0).contains(&c.hue));
+            assert!(crate::fastmath::hue_distance(c.hue, a.hue) <= crate::fastmath::hue_distance(a.hue, b.hue) * 0.5 + 1e-5);
+        }
+    }
+
+    #[test]
+    fn mate_acceptance_depends_on_preference() {
+        let mut rng = Rng::new(12);
+        let mut a = Genome::random(&mut rng);
+        let mut b = Genome::random(&mut rng);
+        a.hue = 0.2;
+        b.hue = 0.45;
+        a.mate_pref = 0.0;
+        assert!(a.accepts(&b));
+        a.mate_pref = 0.5; // tolerance 0.125
+        assert!(!a.accepts(&b));
+        b.hue = 0.3;
+        assert!(a.accepts(&b));
     }
 
     #[test]

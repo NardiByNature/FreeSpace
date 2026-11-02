@@ -192,6 +192,30 @@ export class Renderer {
     }
   }
 
+  /** Fading path of recent positions (x, y pairs, oldest first). Breaks at torus seams. */
+  drawTrail(cam: Camera, pts: number[]): void {
+    const n = pts.length / 2;
+    if (n < 2) return;
+    const ctx = this.ctx;
+    ctx.lineCap = "round";
+    const halfW = cam.worldW / 2;
+    const halfH = cam.worldH / 2;
+    for (let i = 1; i < n; i++) {
+      const x0 = pts[(i - 1) * 2];
+      const y0 = pts[(i - 1) * 2 + 1];
+      const x1 = pts[i * 2];
+      const y1 = pts[i * 2 + 1];
+      if (Math.abs(x1 - x0) > halfW || Math.abs(y1 - y0) > halfH) continue;
+      const a = (i / n) * 0.6;
+      ctx.strokeStyle = `rgba(255,255,255,${a.toFixed(3)})`;
+      ctx.lineWidth = Math.max(1, 1.2 * cam.zoom * (0.4 + (i / n) * 0.6));
+      ctx.beginPath();
+      ctx.moveTo(cam.screenX(x0), cam.screenY(y0));
+      ctx.lineTo(cam.screenX(x1), cam.screenY(y1));
+      ctx.stroke();
+    }
+  }
+
   /** Draw the selected creature's sense radius; called after `draw` with inspect data. */
   drawSenseRing(cam: Camera, x: number, y: number, sense: number): void {
     const ctx = this.ctx;

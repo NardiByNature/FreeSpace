@@ -32,6 +32,8 @@ export class App {
   private selectedSlot = -1;
   private selectedId = 0;
   private follow = false;
+  /** Recent positions of the selected creature, for the trail. */
+  private trail: number[] = [];
   private frame = 0;
   private lastFrameTime = performance.now();
   private tickDebt = 0;
@@ -46,11 +48,12 @@ export class App {
     gen: $("gen"),
     tps: $("tps"),
     seed: $<HTMLInputElement>("seed"),
+    sexual: $<HTMLInputElement>("sexual"),
     file: $<HTMLInputElement>("file"),
   };
 
-  constructor(private readonly core: Core, seed: number) {
-    this.sim = new Sim(seed);
+  constructor(private readonly core: Core, seed: number, sexual: boolean) {
+    this.sim = new Sim(seed, sexual);
     this.cam = new Camera(this.sim.width(), this.sim.height());
     this.renderer = new Renderer(this.canvas);
     this.inspector = new Inspector($("side"));
@@ -58,11 +61,26 @@ export class App {
       this.follow = on;
     };
     this.inspector.onSpawnCode = (code, name) => this.spawnCode(code, name);
+    this.inspector.onSelectSlot = (kind) => {
+      const slot = this.sim.champion(kind);
+      if (slot >= 0) this.select(slot);
+    };
+    window.addEventListener("hashchange", () => {
+      const m = /seed=(\d+)/.exec(location.hash);
+      if (!m) return;
+      const seed = Number(m[1]) >>> 0;
+      const sexual = /(^|[#&])sexual(&|$)/.test(location.hash);
+      if (seed !== this.sim.seed() || sexual !== this.sim.sexual()) {
+        this.els.sexual.checked = sexual;
+        this.newWorld(seed);
+      }
+    });
     this.charts = new Charts($<HTMLCanvasElement>("popchart"), $<HTMLCanvasElement>("huechart"), $<HTMLCanvasElement>("approachchart"));
     this.timelineView = new TimelineView($<HTMLCanvasElement>("timeline"), this.timeline);
     this.timelineView.onRewind = (i) => this.rewind(i);
     this.timeline.reset(this.sim);
     this.els.seed.value = String(seed);
+    this.els.sexual.checked = sexual;
     this.bindControls();
     this.bindCanvas();
     this.layout();
@@ -107,13 +125,14 @@ export class App {
     this.selectedSlot = -1;
     this.inspector.reset();
     this.els.seed.value = String(this.sim.seed());
+    this.els.sexual.checked = this.sim.sexual();
     this.tpsWindow = [];
     this.tickDebt = 0;
-    history.replaceState(null, "", `#seed=${this.sim.seed()}`);
+    history.replaceState(null, "", `#seed=${this.sim.seed()}${this.sim.sexual() ? "&sexual" : ""}`);
   }
 
   private newWorld(seed: number): void {
-    this.replaceSim(new Sim(seed), false);
+    this.replaceSim(new Sim(seed, this.els.sexual.checked), false);
   }
 
   /** Rewind to checkpoint `index`. The world then replays identically unless touched. */
@@ -239,13 +258,18 @@ export class App {
     const r = 12 / this.cam.zoom + 10;
     const slot = this.sim.pick(wx, wy, r);
     if (slot >= 0) {
-      this.selectedSlot = slot;
-      this.selectedId = this.sim.creature_id(slot);
-      this.inspector.reset();
+      this.select(slot);
     } else {
       this.selectedSlot = -1;
       this.inspector.reset();
     }
+  }
+
+  private select(slot: number): void {
+    this.selectedSlot = slot;
+    this.selectedId = this.sim.creature_id(slot);
+    this.trail = [];
+    this.inspector.reset();
   }
 
   private save(): void {
@@ -326,10 +350,16 @@ export class App {
         }
       }
       if (this.follow) this.cam.centerOn(selX, selY);
+      const t = this.trail;
+      if (t.length < 2 || t[t.length - 2] !== selX || t[t.length - 1] !== selY) {
+        t.push(selX, selY);
+        if (t.length > 480) t.splice(0, t.length - 480);
+      }
     }
 
     this.renderer.draw(this.core, this.sim, this.cam, this.selectedSlot);
     if (this.selectedSlot >= 0) {
+      this.renderer.drawTrail(this.cam, this.trail);
       this.renderer.drawSenseRing(this.cam, selX, selY, selSense);
       this.inspector.showCreature(this.core, this.sim, this.selectedSlot, this.follow);
     } else if (this.frame % 6 === 0) {

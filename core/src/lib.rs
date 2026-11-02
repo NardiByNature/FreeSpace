@@ -51,8 +51,13 @@ pub struct Sim {
 #[wasm_bindgen]
 impl Sim {
     #[wasm_bindgen(constructor)]
-    pub fn new(seed: u32) -> Sim {
-        Sim::wrap(World::new(seed, Config::default()))
+    pub fn new(seed: u32, sexual: bool) -> Sim {
+        let cfg = Config { sexual, ..Config::default() };
+        Sim::wrap(World::new(seed, cfg))
+    }
+
+    pub fn sexual(&self) -> bool {
+        self.world.cfg.sexual
     }
 
     fn wrap(world: World) -> Sim {
@@ -164,6 +169,10 @@ impl Sim {
     /// Slot of the nearest live creature within `r`, or -1.
     pub fn pick(&self, x: f32, y: f32, r: f32) -> i32 {
         self.world.pick(x, y, r).map(|s| s as i32).unwrap_or(-1)
+    }
+    /// Slot of a record holder (0 oldest, 1 most meals, 2 highest generation), or -1.
+    pub fn champion(&self, kind: u32) -> i32 {
+        self.world.champion(kind).map(|s| s as i32).unwrap_or(-1)
     }
     pub fn creature_alive(&self, slot: u32) -> bool {
         let c = &self.world.creatures;
@@ -294,6 +303,6 @@ impl Sim {
         brain::OUTPUT_NAMES.join("|")
     }
     pub fn trait_names() -> String {
-        "size|speed|sense|hue|diet|breed at|mutation".to_string()
+        "size|speed|sense|hue|diet|breed at|mutation|mate pref".to_string()
     }
 }

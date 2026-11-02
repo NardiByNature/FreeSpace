@@ -59,17 +59,22 @@ fn lineage_dominance_and_loss() {
     w.spawn_genome(&g, 400);
     w.step(10);
     assert!(kinds(&w).contains(&EV_LINEAGE_DOMINANT));
-    // Wipe out everything in that hue bin.
+    // Wipe out everything in that hue bin and its neighbours, so no newborn
+    // can drift back into the bin before the next sample.
     let bin = (0.5 * HUE_BINS as f32) as usize;
     for i in 0..w.creatures.capacity() {
-        if w.creatures.alive[i] && ((w.creatures.genome[i].hue * HUE_BINS as f32) as usize).min(HUE_BINS - 1) == bin {
+        let b = ((w.creatures.genome[i].hue * HUE_BINS as f32) as usize).min(HUE_BINS - 1);
+        if w.creatures.alive[i] && b.abs_diff(bin) <= 2 {
             w.creatures.energy[i] = -1.0e6;
         }
     }
     w.step(10);
-    let lost = (0..w.chronicle.len).map(|i| w.chronicle.event(i)).find(|e| e.kind == EV_LINEAGE_LOST).expect("lineage lost");
-    assert!((lost.a - (bin as f32 + 0.5) / HUE_BINS as f32).abs() < 1e-6);
-    assert!(lost.b > 0.3);
+    let hue = (bin as f32 + 0.5) / HUE_BINS as f32;
+    let lost = (0..w.chronicle.len)
+        .map(|i| w.chronicle.event(i))
+        .find(|e| e.kind == EV_LINEAGE_LOST && (e.a - hue).abs() < 1e-6)
+        .expect("lineage lost for the spawned colour");
+    assert!(lost.b > 0.3, "peak share {}", lost.b);
 }
 
 #[test]

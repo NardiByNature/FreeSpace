@@ -42,6 +42,11 @@ export const F = {
   meanDiet: 12,
   nutrients: 13,
   generation: 14,
+  bites: 15,
+  meanPref: 16,
+  hybrids: 17,
+  oldest: 18,
+  mostMeals: 19,
 } as const;
 
 // Creature view columns, mirroring CREATURE_STRIDE in core/src/lib.rs.

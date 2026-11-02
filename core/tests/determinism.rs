@@ -46,6 +46,24 @@ fn restore_continues_identically() {
 }
 
 #[test]
+fn sexual_worlds_are_deterministic_and_restorable() {
+    let mut c = cfg();
+    c.sexual = true;
+    let mut a = World::new(21, c.clone());
+    let mut b = World::new(21, c);
+    a.step(1_500);
+    b.step(1_500);
+    assert!(a.population() > 0);
+    assert_eq!(a.snapshot(), b.snapshot());
+    let bytes = a.snapshot();
+    let mut r = World::restore(&bytes).unwrap();
+    assert!(r.cfg.sexual);
+    a.step(500);
+    r.step(500);
+    assert_eq!(a.snapshot(), r.snapshot());
+}
+
+#[test]
 fn rejects_garbage() {
     assert!(World::restore(b"nope").is_err());
     let mut a = World::new(1, cfg());

@@ -52,6 +52,12 @@ pub struct Config {
     pub min_population: u32,
     /// 0 = uniform soil, 1 = strong fertile patches with barren ground between.
     pub terrain_contrast: f32,
+    /// Two parents and mate choice by colour, instead of budding.
+    pub sexual: bool,
+    /// Ticks a ready creature waits for a partner before breeding alone.
+    pub solo_after: f32,
+    /// A partner must be within this multiple of the two bodies' radii.
+    pub mate_reach: f32,
 }
 
 impl Default for Config {
@@ -90,12 +96,15 @@ impl Default for Config {
             history_every: 10,
             min_population: 20,
             terrain_contrast: 0.8,
+            sexual: false,
+            solo_after: 600.0,
+            mate_reach: 3.0,
         }
     }
 }
 
 impl Config {
-    pub const N_FIELDS: usize = 34;
+    pub const N_FIELDS: usize = 36;
     /// Flat f32 encoding for snapshots. Integers survive exactly below 2^24.
     pub fn to_fields(&self) -> [f32; Self::N_FIELDS] {
         [
@@ -132,7 +141,9 @@ impl Config {
             self.history_every as f32,
             self.min_population as f32,
             self.terrain_contrast,
-            0.0,
+            if self.sexual { 1.0 } else { 0.0 },
+            self.solo_after,
+            self.mate_reach,
         ]
     }
     pub fn from_fields(f: &[f32; Self::N_FIELDS]) -> Config {
@@ -176,6 +187,9 @@ impl Config {
             history_every: next() as u32,
             min_population: next() as u32,
             terrain_contrast: next(),
+            sexual: next() > 0.5,
+            solo_after: next(),
+            mate_reach: next(),
         }
     }
 }
@@ -192,6 +206,8 @@ pub struct Creatures {
     pub age: Vec<f32>,
     pub generation: Vec<u32>,
     pub meals: Vec<u32>,
+    /// Ticks spent above the breeding threshold without finding a partner.
+    pub ready_ticks: Vec<f32>,
     /// Hot copies of genome fields read for *other* creatures during sensing,
     /// kept in their own arrays so neighbour lookups stay cache-friendly.
     pub size: Vec<f32>,
@@ -207,7 +223,7 @@ pub struct Creatures {
 
 impl Creatures {
     pub fn new(capacity: usize) -> Creatures {
-        let blank = Genome::from_parts([1.0, 1.0, 32.0, 0.0, 0.0, 0.7, 0.05], [0.0; crate::genome::N_W]);
+        let blank = Genome::from_parts([1.0, 1.0, 32.0, 0.0, 0.0, 0.7, 0.05, 0.0], [0.0; crate::genome::N_W]);
         Creatures {
             alive: vec![false; capacity],
             id: vec![0; capacity],
@@ -218,6 +234,7 @@ impl Creatures {
             age: vec![0.0; capacity],
             generation: vec![0; capacity],
             meals: vec![0; capacity],
+            ready_ticks: vec![0.0; capacity],
             size: vec![1.0; capacity],
             hue: vec![0.0; capacity],
             radius: vec![6.0; capacity],
@@ -252,6 +269,7 @@ impl Creatures {
         self.age[u] = 0.0;
         self.generation[u] = generation;
         self.meals[u] = 0;
+        self.ready_ticks[u] = 0.0;
         self.size[u] = genome.size;
         self.hue[u] = genome.hue;
         self.radius[u] = genome.radius();
@@ -662,23 +680,88 @@ impl World {
             }
             let g = &self.creatures.genome[i];
             if self.creatures.energy[i] < g.reproduce_at * g.max_energy() {
+                self.creatures.ready_ticks[i] = 0.0;
                 continue;
             }
-            let child_e = self.creatures.energy[i] * self.cfg.child_share;
-            self.creatures.energy[i] -= child_e;
-            let child = g.mutate(&mut self.rng);
-            let ang = self.rng.range(-core::f32::consts::PI, core::f32::consts::PI);
-            let (sy, sx) = sin_cos(ang);
-            let dist = g.radius() * 2.5;
-            let x = wrap(self.creatures.x[i] + sx * dist, self.cfg.width);
-            let y = wrap(self.creatures.y[i] + sy * dist, self.cfg.height);
-            let gen = self.creatures.generation[i] + 1;
-            let e = child_e.min(child.max_energy());
-            let id = self.next_id;
-            self.next_id += 1;
-            self.creatures.spawn(id, x, y, ang, e, gen, child);
-            self.tally.births += 1;
+            if !self.cfg.sexual {
+                self.bud(i);
+                continue;
+            }
+            match self.find_mate(i) {
+                Some(j) => self.mate(i, j),
+                None => {
+                    self.creatures.ready_ticks[i] += 1.0;
+                    if self.creatures.ready_ticks[i] >= self.cfg.solo_after {
+                        self.bud(i);
+                    }
+                }
+            }
         }
+    }
+
+    /// A willing, ready neighbour within mating reach, or None.
+    fn find_mate(&self, i: usize) -> Option<usize> {
+        let c = &self.creatures;
+        let gi = &c.genome[i];
+        let reach = c.radius[i] * 2.0 * self.cfg.mate_reach;
+        let hit = self.creature_hash.nearest(&c.x, &c.y, c.x[i], c.y[i], reach, i as u32, |j| {
+            let j = j as usize;
+            if !c.alive[j] {
+                return true;
+            }
+            let gj = &c.genome[j];
+            c.energy[j] < gj.reproduce_at * gj.max_energy() || !gi.accepts(gj) || !gj.accepts(gi)
+        })?;
+        let j = hit.index as usize;
+        // Reach is the sum of both bodies' radii times the multiplier.
+        let real_reach = (c.radius[i] + c.radius[j]) * self.cfg.mate_reach;
+        (hit.dist2 <= real_reach * real_reach).then_some(j)
+    }
+
+    /// Asexual: a mutated copy, parent pays `child_share` of its energy.
+    fn bud(&mut self, i: usize) {
+        let g = &self.creatures.genome[i];
+        let child_e = self.creatures.energy[i] * self.cfg.child_share;
+        self.creatures.energy[i] -= child_e;
+        let child = g.mutate(&mut self.rng);
+        let gen = self.creatures.generation[i] + 1;
+        let (x, y) = (self.creatures.x[i], self.creatures.y[i]);
+        let r = g.radius();
+        self.creatures.ready_ticks[i] = 0.0;
+        self.place_child(child, child_e, gen, x, y, r * 2.5);
+    }
+
+    /// Sexual: crossover plus mutation, each parent pays half the child's share.
+    fn mate(&mut self, i: usize, j: usize) {
+        let c = &mut self.creatures;
+        let half = self.cfg.child_share * 0.5;
+        let ei = c.energy[i] * half;
+        let ej = c.energy[j] * half;
+        c.energy[i] -= ei;
+        c.energy[j] -= ej;
+        c.ready_ticks[i] = 0.0;
+        c.ready_ticks[j] = 0.0;
+        let (gi, gj) = (&c.genome[i], &c.genome[j]);
+        if hue_distance(gi.hue, gj.hue) > 0.1 {
+            self.tally.hybrids += 1;
+        }
+        let child = Genome::crossover(gi, gj, &mut self.rng).mutate(&mut self.rng);
+        let gen = c.generation[i].max(c.generation[j]) + 1;
+        let (x, y) = (c.x[i], c.y[i]);
+        let r = c.radius[i];
+        self.place_child(child, ei + ej, gen, x, y, r * 2.5);
+    }
+
+    fn place_child(&mut self, child: Genome, energy: f32, generation: u32, x: f32, y: f32, dist: f32) {
+        let ang = self.rng.range(-core::f32::consts::PI, core::f32::consts::PI);
+        let (sy, sx) = sin_cos(ang);
+        let cx = wrap(x + sx * dist, self.cfg.width);
+        let cy = wrap(y + sy * dist, self.cfg.height);
+        let e = energy.min(child.max_energy());
+        let id = self.next_id;
+        self.next_id += 1;
+        self.creatures.spawn(id, cx, cy, ang, e, generation, child);
+        self.tally.births += 1;
     }
 
     /// Founders wash in when the dish is nearly empty (configurable).
@@ -743,14 +826,18 @@ impl World {
         let mut row = [0.0f32; SAMPLE_STRIDE];
         let mut n = 0u32;
         let (mut herb, mut omni, mut carn) = (0u32, 0u32, 0u32);
-        let (mut s_size, mut s_speed, mut s_sense, mut s_diet) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+        let (mut s_size, mut s_speed, mut s_sense, mut s_diet, mut s_pref) = (0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32);
         let mut max_gen = 0u32;
+        let mut oldest = 0.0f32;
+        let mut most_meals = 0u32;
         for i in 0..c.capacity() {
             if !c.alive[i] {
                 continue;
             }
             let g = &c.genome[i];
             n += 1;
+            oldest = oldest.max(c.age[i]);
+            most_meals = most_meals.max(c.meals[i]);
             if g.diet < 0.33 {
                 herb += 1;
             } else if g.diet < 0.66 {
@@ -762,6 +849,7 @@ impl World {
             s_speed += g.speed;
             s_sense += g.sense_range;
             s_diet += g.diet;
+            s_pref += g.mate_pref;
             max_gen = max_gen.max(c.generation[i]);
             let bin = ((g.hue * HUE_BINS as f32) as usize).min(HUE_BINS - 1);
             row[stats::N_FIELDS + bin] += 1.0;
@@ -783,6 +871,10 @@ impl World {
         row[stats::F_NUTRIENTS] = self.nutrients.total();
         row[stats::F_GENERATION] = max_gen as f32;
         row[stats::F_BITES] = self.tally.bites as f32;
+        row[stats::F_MEAN_PREF] = s_pref * inv;
+        row[stats::F_HYBRIDS] = self.tally.hybrids as f32;
+        row[stats::F_OLDEST] = oldest;
+        row[stats::F_MOST_MEALS] = most_meals as f32;
         self.history.push(&row);
         self.chronicle.observe(&self.history, self.tally.washed);
         self.tally = Tally::default();
@@ -817,6 +909,26 @@ impl World {
         }
         out[5] = t.elapsed().as_secs_f64();
         out
+    }
+
+    /// Slot of the current record holder: 0 oldest, 1 most meals, 2 highest generation.
+    pub fn champion(&self, kind: u32) -> Option<u32> {
+        let c = &self.creatures;
+        let mut best: Option<(u32, f32)> = None;
+        for i in 0..c.capacity() {
+            if !c.alive[i] {
+                continue;
+            }
+            let score = match kind {
+                0 => c.age[i],
+                1 => c.meals[i] as f32,
+                _ => c.generation[i] as f32,
+            };
+            if best.is_none_or(|b| score > b.1) {
+                best = Some((i as u32, score));
+            }
+        }
+        best.map(|b| b.0)
     }
 
     /// Nearest living creature to (x, y) within `r`, as a slot index.
