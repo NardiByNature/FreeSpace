@@ -59,6 +59,7 @@ export class App {
     this.bindCanvas();
     this.layout();
     this.cam.fit();
+    new ResizeObserver(() => this.layout()).observe(this.canvas);
     window.addEventListener("resize", () => this.layout());
     // Handy from the devtools console.
     (window as unknown as { tidepool: App }).tidepool = this;
@@ -75,10 +76,12 @@ export class App {
   }
 
   private layout(): void {
-    const rect = this.canvas.getBoundingClientRect();
+    const w = this.canvas.clientWidth;
+    const h = this.canvas.clientHeight;
+    if (w === 0 || h === 0) return;
     const dpr = window.devicePixelRatio || 1;
-    this.renderer.resize(rect.width, rect.height, dpr);
-    this.cam.resize(rect.width, rect.height);
+    this.renderer.resize(w, h, dpr);
+    this.cam.resize(w, h);
     this.charts.draw(this.core, this.sim, true);
   }
 

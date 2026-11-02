@@ -37,12 +37,13 @@ export class Renderer {
     }
   }
 
+  /** Size the backing store to the canvas's CSS box; CSS owns the layout. */
   resize(w: number, h: number, dpr: number): void {
     this.dpr = dpr;
-    this.canvas.width = Math.max(1, Math.floor(w * dpr));
-    this.canvas.height = Math.max(1, Math.floor(h * dpr));
-    this.canvas.style.width = `${w}px`;
-    this.canvas.style.height = `${h}px`;
+    const bw = Math.max(1, Math.floor(w * dpr));
+    const bh = Math.max(1, Math.floor(h * dpr));
+    if (this.canvas.width !== bw) this.canvas.width = bw;
+    if (this.canvas.height !== bh) this.canvas.height = bh;
   }
 
   draw(core: Core, sim: Sim, cam: Camera, selectedSlot: number): void {
