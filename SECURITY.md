@@ -74,6 +74,12 @@ Rust: `Cargo.lock` resolves to `wasm-bindgen` plus its own macro crates
 `rustversion`). All are rust-lang or wasm-bindgen org crates or
 proc-macro ecosystem staples with years of history.
 
+### 2026-11-02, phase 4 (chronicle, time machine, specimens, sexual rule)
+
+No dependency changes. The base64 codec for specimen codes is hand-written
+in `core/src/codec.rs` rather than a crate. `npm ls --all` and
+`npm audit signatures` re-run with the same result as above.
+
 ## How to re-check
 
 ```bash

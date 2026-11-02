@@ -91,9 +91,9 @@ impl Genome {
 
     /// Recombine two parents. The brain has structure, so each hidden unit
     /// travels as a block (its input weights plus its output weights) from
-    /// one parent; output biases come from one parent each. Traits pick a
-    /// parent at random, except hue, which is the circular midpoint so colour
-    /// behaves like a blended quantitative trait.
+    /// one parent; output biases come from one parent each. Every trait,
+    /// hue included, comes from one parent or the other (Mendelian rather
+    /// than blended; blending hue was tried and only sped up colour collapse).
     pub fn crossover(a: &Genome, b: &Genome, rng: &mut Rng) -> Genome {
         let pick = |rng: &mut Rng, x: f32, y: f32| if rng.chance(0.5) { x } else { y };
         let mut weights = [0.0f32; N_W];
@@ -110,17 +110,11 @@ impl Genome {
             let k = out_base + o * (N_HID + 1) + N_HID;
             weights[k] = pick(rng, a.weights[k], b.weights[k]);
         }
-        let mut d = b.hue - a.hue;
-        if d > 0.5 {
-            d -= 1.0;
-        } else if d < -0.5 {
-            d += 1.0;
-        }
         Genome {
             size: pick(rng, a.size, b.size),
             speed: pick(rng, a.speed, b.speed),
             sense_range: pick(rng, a.sense_range, b.sense_range),
-            hue: wrap01(a.hue + d * 0.5),
+            hue: if rng.chance(0.5) { a.hue } else { b.hue },
             diet: pick(rng, a.diet, b.diet),
             reproduce_at: pick(rng, a.reproduce_at, b.reproduce_at),
             mutation_rate: pick(rng, a.mutation_rate, b.mutation_rate),
@@ -267,8 +261,7 @@ mod tests {
             }
             assert!(c.size == a.size || c.size == b.size);
             assert!(c.diet == a.diet || c.diet == b.diet);
-            assert!((0.0..1.0).contains(&c.hue));
-            assert!(crate::fastmath::hue_distance(c.hue, a.hue) <= crate::fastmath::hue_distance(a.hue, b.hue) * 0.5 + 1e-5);
+            assert!(c.hue == a.hue || c.hue == b.hue);
         }
     }
 
