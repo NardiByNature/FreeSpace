@@ -103,6 +103,21 @@ impl Genome {
         child
     }
 
+    /// Pull every field into its legal range (used when decoding codes).
+    pub fn clamped(mut self) -> Genome {
+        self.size = clamp(self.size, SIZE_MIN, SIZE_MAX);
+        self.speed = clamp(self.speed, SPEED_MIN, SPEED_MAX);
+        self.sense_range = clamp(self.sense_range, SENSE_MIN, SENSE_MAX);
+        self.hue = wrap01(self.hue);
+        self.diet = clamp(self.diet, 0.0, 1.0);
+        self.reproduce_at = clamp(self.reproduce_at, REPRO_MIN, REPRO_MAX);
+        self.mutation_rate = clamp(self.mutation_rate, MUT_MIN, MUT_MAX);
+        for w in self.weights.iter_mut() {
+            *w = clamp(*w, -W_LIMIT, W_LIMIT);
+        }
+        self
+    }
+
     pub fn max_energy(&self) -> f32 {
         100.0 * self.size
     }

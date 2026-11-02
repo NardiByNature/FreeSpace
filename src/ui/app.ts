@@ -4,6 +4,7 @@ import { Core, Sim } from "../wasm.js";
 import { Charts } from "./charts.js";
 import { Inspector } from "./inspector.js";
 import { Timeline, TimelineView } from "./timeline.js";
+import { toast } from "./toast.js";
 
 const FRAME_BUDGET_MS = 13;
 /** Simulation ticks per second at 1x, independent of display refresh rate. */
@@ -25,7 +26,6 @@ export class App {
   private readonly charts: Charts;
   readonly timeline = new Timeline();
   private readonly timelineView: TimelineView;
-  private toastTimer = 0;
   private playing = true;
   /** Ticks per frame; 0 means as many as fit the budget. */
   private speed = 1;
@@ -57,6 +57,7 @@ export class App {
     this.inspector.onFollowChange = (on) => {
       this.follow = on;
     };
+    this.inspector.onSpawnCode = (code, name) => this.spawnCode(code, name);
     this.charts = new Charts($<HTMLCanvasElement>("popchart"), $<HTMLCanvasElement>("huechart"), $<HTMLCanvasElement>("approachchart"));
     this.timelineView = new TimelineView($<HTMLCanvasElement>("timeline"), this.timeline);
     this.timelineView.onRewind = (i) => this.rewind(i);
@@ -123,25 +124,20 @@ export class App {
     try {
       next = Sim.restore(cp.bytes);
     } catch (err) {
-      this.toast(`Could not rewind: ${err instanceof Error ? err.message : String(err)}`);
+      toast(`Could not rewind: ${err instanceof Error ? err.message : String(err)}`);
       return;
     }
     this.replaceSim(next, true);
-    this.toast(`Rewound to t ${cp.tick.toLocaleString()}. Left alone, the future replays exactly; touch anything and it branches.`);
+    toast(`Rewound to t ${cp.tick.toLocaleString()}. Left alone, the future replays exactly; touch anything and it branches.`);
   }
 
-  private toast(text: string): void {
-    const el = $("toast");
-    el.textContent = text;
-    el.hidden = false;
-    el.classList.remove("fade");
-    window.clearTimeout(this.toastTimer);
-    this.toastTimer = window.setTimeout(() => {
-      el.classList.add("fade");
-      this.toastTimer = window.setTimeout(() => {
-        el.hidden = true;
-      }, 700);
-    }, 6000);
+  private spawnCode(code: string, name: string): void {
+    const placed = this.sim.spawn_code(code, 20);
+    if (placed === 0) {
+      toast("That is not a genome code, or the dish is full.", 4000);
+    } else {
+      toast(`Placed ${placed} copies of ${name}.`, 3000);
+    }
   }
 
   private bindControls(): void {
@@ -157,7 +153,14 @@ export class App {
       const seed = raw === "" ? (Math.random() * 0xffffffff) >>> 0 : (Number(raw) >>> 0) || 0;
       this.newWorld(seed);
     });
-    $("life").addEventListener("click", () => this.sim.spawn_founders(50));
+    $("life").addEventListener("click", () => {
+      this.sim.spawn_founders(50);
+      toast("The tide brought 50 newcomers.", 2500);
+    });
+    $("paste").addEventListener("click", () => {
+      const code = window.prompt("Paste a genome code:");
+      if (code) this.spawnCode(code, "pasted genome");
+    });
     $("save").addEventListener("click", () => this.save());
     $("load").addEventListener("click", () => this.els.file.click());
     this.els.file.addEventListener("change", () => {
@@ -181,7 +184,7 @@ export class App {
       } else if (e.key === "]") {
         // After a rewind the future is discarded, so there is nothing to step to;
         // the key exists so the pair feels complete and for a future branch list.
-        this.toast("Nothing ahead of now. Let it run.");
+        toast("Nothing ahead of now. Let it run.", 2500);
       }
     });
   }

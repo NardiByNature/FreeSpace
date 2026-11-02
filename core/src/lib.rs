@@ -6,6 +6,7 @@
 //! memory so the renderer reads it through typed-array views without copies.
 
 pub mod brain;
+pub mod codec;
 pub mod fastmath;
 pub mod genome;
 pub mod plants;
@@ -238,6 +239,28 @@ impl Sim {
     // ---- interventions ----
     pub fn spawn_founders(&mut self, n: u32) {
         self.world.spawn_founders(n);
+    }
+
+    // ---- specimens ----
+    /// A creature's genome as a portable code, or "" if the slot is empty.
+    pub fn genome_code(&self, slot: u32) -> String {
+        let c = &self.world.creatures;
+        let i = slot as usize;
+        if i >= c.capacity() || !c.alive[i] {
+            return String::new();
+        }
+        codec::encode_genome(&c.genome[i])
+    }
+    /// Drop `n` copies of a coded genome in at random positions; returns how many fit (0 for a bad code).
+    pub fn spawn_code(&mut self, code: &str, n: u32) -> u32 {
+        match codec::decode_genome(code) {
+            Ok(g) => self.world.spawn_genome(&g, n),
+            Err(_) => 0,
+        }
+    }
+    /// The 7 traits of a coded genome, or an empty array for a bad code.
+    pub fn code_traits(&self, code: &str) -> Vec<f32> {
+        codec::decode_genome(code).map(|g| g.traits().to_vec()).unwrap_or_default()
     }
 
     // ---- layout metadata so the TS side never hard-codes sizes ----

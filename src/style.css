@@ -57,6 +57,12 @@ input[type=text] { background: #0b1016; color: var(--text); border: 1px solid va
 .trait .v { text-align: right; }
 .trait .bar { margin: 0; }
 .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 50%; vertical-align: -2px; margin-right: 6px; }
+.specimens { display: flex; flex-direction: column; gap: 6px; }
+.spec { display: grid; grid-template-columns: auto 1fr auto auto auto; gap: 8px; align-items: center; }
+.spec .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.spec .m { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.spec button { padding: 3px 8px; font-size: 12px; }
+.spec button.x { padding: 3px 7px; color: var(--muted); }
 .chronicle { display: flex; flex-direction: column; gap: 6px; }
 .chronicle .ev { line-height: 1.4; color: var(--text); }
 .chronicle .ev .t { color: var(--muted); font-variant-numeric: tabular-nums; margin-right: 8px; font-size: 11px; }

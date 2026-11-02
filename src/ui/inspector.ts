@@ -1,5 +1,7 @@
 import { F, I, type Core, type Sim } from "../wasm.js";
 import { describe, parseEvents } from "./chronicle.js";
+import { dietWord, loadSpecimens, saveSpecimens, type Specimen } from "./specimens.js";
+import { toast } from "./toast.js";
 
 // Trait display ranges, mirroring the clamps in core/src/genome.rs.
 const TRAIT_RANGES: [number, number][] = [
@@ -29,6 +31,9 @@ export class Inspector {
   private seenEvents = -1;
   followBox: HTMLInputElement | null = null;
   onFollowChange: ((on: boolean) => void) | null = null;
+  onSpawnCode: ((code: string, name: string) => void) | null = null;
+  private currentSlot = -1;
+  private currentSim: Sim | null = null;
 
   constructor(private readonly root: HTMLElement) {}
 
@@ -129,11 +134,17 @@ export class Inspector {
     this.root.append(list);
     this.chronicleList = list;
     this.seenEvents = -1;
+    this.root.append(el("h3", undefined, "Specimens"));
+    const specs = el("div", "specimens");
+    this.root.append(specs);
+    this.renderSpecimens(specs);
     void core;
   }
 
   showCreature(core: Core, sim: Sim, slot: number, follow: boolean): void {
     if (this.mode !== "creature") this.buildCreature(core, follow);
+    this.currentSlot = slot;
+    this.currentSim = sim;
     const d = sim.inspect(slot);
     const L = core.layout;
     const set = (k: string, v: string) => {
@@ -222,6 +233,16 @@ export class Inspector {
     this.root.append(row);
     this.followBox = box;
 
+    const actions = el("div", "row");
+    const copy = el("button", undefined, "Copy genome");
+    copy.title = "Copy this creature's genome code to the clipboard";
+    copy.addEventListener("click", () => void this.copyGenome());
+    const keep = el("button", undefined, "Keep specimen");
+    keep.title = "Save this genome in this browser so you can drop it into other worlds";
+    keep.addEventListener("click", () => this.keepSpecimen());
+    actions.append(copy, keep);
+    this.root.append(actions);
+
     this.root.append(el("h3", undefined, "Genome"));
     for (let t = 0; t < core.layout.nTraits; t++) {
       const tr = el("div", "trait");
@@ -245,6 +266,60 @@ export class Inspector {
     this.root.append(
       el("p", undefined, "Left: what it senses. Middle: hidden layer. Right: what it does. Teal links excite, orange inhibit; thicker is stronger. Node brightness is the current activation."),
     );
+  }
+
+  private async copyGenome(): Promise<void> {
+    const sim = this.currentSim;
+    if (!sim || this.currentSlot < 0) return;
+    const code = sim.genome_code(this.currentSlot);
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      toast("Genome code copied. Paste it into any Tidepool with the Paste genome button.", 4000);
+    } catch {
+      window.prompt("Copy this genome code:", code);
+    }
+  }
+
+  private keepSpecimen(): void {
+    const sim = this.currentSim;
+    if (!sim || this.currentSlot < 0) return;
+    const code = sim.genome_code(this.currentSlot);
+    if (!code) return;
+    const d = sim.inspect(this.currentSlot);
+    const traits = sim.code_traits(code);
+    const name = window.prompt("Name this specimen:", `#${d[I.id]} ${dietWord(traits[4] ?? 0)}`);
+    if (!name) return;
+    const list = loadSpecimens();
+    list.unshift({ name, code, hue: traits[3] ?? 0, diet: traits[4] ?? 0, generation: d[I.generation], kept: Date.now() });
+    saveSpecimens(list);
+    toast(`Kept ${name}. Find it under Specimens when nothing is selected.`, 4000);
+  }
+
+  private renderSpecimens(container: HTMLElement): void {
+    container.replaceChildren();
+    const list = loadSpecimens();
+    if (list.length === 0) {
+      container.append(el("p", undefined, "None kept yet. Select a creature and press Keep specimen."));
+      return;
+    }
+    for (const sp of list) {
+      const row = el("div", "spec");
+      const sw = el("span", "swatch");
+      sw.style.background = `hsl(${sp.hue * 360} 72% 60%)`;
+      const label = el("span", "n", `${sp.name}`);
+      const meta = el("span", "m", `${dietWord(sp.diet)} · gen ${sp.generation}`);
+      const spawn = el("button", undefined, "Drop in");
+      spawn.addEventListener("click", () => this.onSpawnCode?.(sp.code, sp.name));
+      const del = el("button", "x", "×");
+      del.title = "Forget this specimen";
+      del.addEventListener("click", () => {
+        saveSpecimens(loadSpecimens().filter((s: Specimen) => s.kept !== sp.kept));
+        this.renderSpecimens(container);
+      });
+      row.append(sw, label, meta, spawn, del);
+      container.append(row);
+    }
   }
 
   private drawBrain(core: Core, d: Float32Array): void {
