@@ -62,7 +62,8 @@ pub struct Config {
     pub season_period: f32,
     /// How lean the depth of winter is: soil capacity falls to (1 - depth). 0 disables seasons.
     pub season_depth: f32,
-    /// Sexual rule: a child's starting energy is scaled by (1 - hybrid_cost * genome distance). 0 disables.
+    /// Sexual rule: a child's starting energy is scaled by (1 - hybrid_cost * distance^2),
+    /// nearly free for close relatives, steep for strangers. 0 disables.
     pub hybrid_cost: f32,
 }
 
@@ -106,7 +107,7 @@ impl Default for Config {
             solo_after: 600.0,
             mate_reach: 3.0,
             season_period: 16_000.0,
-            season_depth: 0.45,
+            season_depth: 0.35,
             hybrid_cost: 0.0,
         }
     }
@@ -779,7 +780,12 @@ impl World {
         }
         // Incompatibility: distant genomes make weaker offspring. The parents
         // have already paid, which is what makes choosiness worth evolving.
-        let viability = if self.cfg.hybrid_cost > 0.0 { (1.0 - self.cfg.hybrid_cost * gi.distance(gj)).max(0.0) } else { 1.0 };
+        let viability = if self.cfg.hybrid_cost > 0.0 {
+            let d = gi.distance(gj);
+            (1.0 - self.cfg.hybrid_cost * d * d).max(0.0)
+        } else {
+            1.0
+        };
         let energy = (ei + ej) * viability;
         if energy < 5.0 {
             return;

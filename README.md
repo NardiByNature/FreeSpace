@@ -78,9 +78,11 @@ draws its path.
 keep it in the browser with a name, drop twenty copies into another world.
 
 **Seasons.** Soil productivity follows a slow cosine, 16,000 ticks per cycle,
-down to 55% at midwinter. The dish never quite settles: populations swing by
-roughly a third with the seasons, lean winters cull the slow and the
-short-sighted, and the readout tells you where in the year you are.
+down to 65% at midwinter. The dish never quite settles: populations swing by
+a quarter to a third with the seasons, lean winters cull the slow and the
+short-sighted, and the readout tells you where in the year you are. A deeper
+winter (55%) was tried first; it made predators rare, because hunters need
+dense herds and every winter thinned them.
 
 ## How it works
 
@@ -129,10 +131,24 @@ combinations that predation needs, and nothing in the model penalises a
 mismatched pair, so there is no pressure for choosiness. Inheriting hue from one parent instead
 of blending it kept more colour variety (one seed held four bands at 80,000
 ticks) but changed nothing else. That is a real result, and the rule ships
-off by default. Ideas for making it work: a cost
-to hybrid offspring between differently adapted parents, or niches that
-differ enough that a generalist loses. The headless harness has the numbers:
-`cargo run --release --example run -- 1 80000 10000 sexual=1`.
+off by default.
+
+The obvious fix was tried next: a cost to hybrids. A child's starting energy
+is scaled by `1 - hybrid_cost * d^2`, where `d` is a genome distance (mostly
+mean weight difference, partly body traits; `hybrid_cost` in the config, 0
+by default). Before running it, the harness measured what `d` looks like,
+and that measurement is the finding. In a budding world, two creatures of
+the same colour are genetically close (d around 0.02 to 0.05) and strangers
+are far (0.08): lineages are real. In a sexual world the two numbers are the
+same (0.075 and 0.077): recombination has made one gene pool, and colour
+tells you nothing about relatedness. A hybrid cost on that population is a
+uniform tax, and the runs confirmed it at two strengths across three seeds:
+no speciation event, choosiness flat, no predators, populations a little
+lower. Speciation needs isolation before it needs incompatibility, which is
+also what the textbooks say. A world with barriers to gene flow is the next
+thing to try, and it is listed below. The headless harness has every number:
+`cargo run --release --example run -- 1 80000 10000 sexual=1 hybrid=50`
+prints the distance report at the end.
 
 **Determinism.** One seeded xoshiro128** generator owned by the world, fixed
 iteration order, and sin/cos/tanh built from arithmetic only (`fastmath.rs`),
@@ -165,7 +181,7 @@ See [SECURITY.md](SECURITY.md) for how they were vetted.
 
 ## Ideas not done yet
 
-WebGL point sprites for 50k+ bodies, the simulation in a Web Worker, a
-lineage tree for the selected creature, seasons, a hybrid-fitness cost that
-might make the sexual rule produce species, and branches you can jump
-between on the timeline.
+Barriers to gene flow (impassable or costly ground between fertile regions),
+which is the missing ingredient for the sexual rule to make species. WebGL
+point sprites for 50k+ bodies, the simulation in a Web Worker, a lineage tree
+for the selected creature, and branches you can jump between on the timeline.
