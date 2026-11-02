@@ -62,6 +62,8 @@ pub struct Config {
     pub season_period: f32,
     /// How lean the depth of winter is: soil capacity falls to (1 - depth). 0 disables seasons.
     pub season_depth: f32,
+    /// Sexual rule: a child's starting energy is scaled by (1 - hybrid_cost * genome distance). 0 disables.
+    pub hybrid_cost: f32,
 }
 
 impl Default for Config {
@@ -105,12 +107,13 @@ impl Default for Config {
             mate_reach: 3.0,
             season_period: 16_000.0,
             season_depth: 0.45,
+            hybrid_cost: 0.0,
         }
     }
 }
 
 impl Config {
-    pub const N_FIELDS: usize = 38;
+    pub const N_FIELDS: usize = 39;
     /// Flat f32 encoding for snapshots. Integers survive exactly below 2^24.
     pub fn to_fields(&self) -> [f32; Self::N_FIELDS] {
         [
@@ -152,6 +155,7 @@ impl Config {
             self.mate_reach,
             self.season_period,
             self.season_depth,
+            self.hybrid_cost,
         ]
     }
     pub fn from_fields(f: &[f32; Self::N_FIELDS]) -> Config {
@@ -200,6 +204,7 @@ impl Config {
             mate_reach: next(),
             season_period: next(),
             season_depth: next(),
+            hybrid_cost: next(),
         }
     }
 }
@@ -772,11 +777,18 @@ impl World {
         if hue_distance(gi.hue, gj.hue) > 0.1 {
             self.tally.hybrids += 1;
         }
+        // Incompatibility: distant genomes make weaker offspring. The parents
+        // have already paid, which is what makes choosiness worth evolving.
+        let viability = if self.cfg.hybrid_cost > 0.0 { (1.0 - self.cfg.hybrid_cost * gi.distance(gj)).max(0.0) } else { 1.0 };
+        let energy = (ei + ej) * viability;
+        if energy < 5.0 {
+            return;
+        }
         let child = Genome::crossover(gi, gj, &mut self.rng).mutate(&mut self.rng);
         let gen = c.generation[i].max(c.generation[j]) + 1;
         let (x, y) = (c.x[i], c.y[i]);
         let r = c.radius[i];
-        self.place_child(child, ei + ej, gen, x, y, r * 2.5);
+        self.place_child(child, energy, gen, x, y, r * 2.5);
     }
 
     fn place_child(&mut self, child: Genome, energy: f32, generation: u32, x: f32, y: f32, dist: f32) {

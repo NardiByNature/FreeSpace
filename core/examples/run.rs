@@ -3,6 +3,60 @@ use std::time::Instant;
 use tidepool_core::stats::*;
 use tidepool_core::world::{Config, World};
 
+/// Typical genome distances: parent to child, two members of the same colour
+/// band, and two random live creatures. Guides the choice of `hybrid_cost`.
+fn distance_report(w: &World) {
+    use tidepool_core::genome::Genome;
+    use tidepool_core::rng::Rng;
+    let c = &w.creatures;
+    let alive: Vec<usize> = (0..c.capacity()).filter(|&i| c.alive[i]).collect();
+    if alive.len() < 10 {
+        return;
+    }
+    let mut rng = Rng::new(0xD15);
+    let pick = |rng: &mut Rng| alive[rng.below(alive.len() as u32) as usize];
+    let stats = |label: &str, vals: &mut Vec<f32>| {
+        if vals.is_empty() {
+            println!("  {label:<14} (no pairs)");
+            return;
+        }
+        vals.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let mean: f32 = vals.iter().sum::<f32>() / vals.len() as f32;
+        println!("  {label:<14} mean {:.3}  p10 {:.3}  p90 {:.3}  (n={})", mean, vals[vals.len() / 10], vals[vals.len() * 9 / 10], vals.len());
+    };
+    println!("genome distances:");
+    let mut kids = Vec::new();
+    for _ in 0..300 {
+        let i = pick(&mut rng);
+        let child = c.genome[i].mutate(&mut rng);
+        kids.push(c.genome[i].distance(&child));
+    }
+    stats("parent-child", &mut kids);
+    let mut same = Vec::new();
+    let mut other = Vec::new();
+    for _ in 0..3000 {
+        let (i, j) = (pick(&mut rng), pick(&mut rng));
+        if i == j {
+            continue;
+        }
+        let d = c.genome[i].distance(&c.genome[j]);
+        if tidepool_core::fastmath::hue_distance(c.genome[i].hue, c.genome[j].hue) < 0.03 {
+            same.push(d);
+        } else {
+            other.push(d);
+        }
+    }
+    stats("same colour", &mut same);
+    stats("other colour", &mut other);
+    let mut founders = Vec::new();
+    for _ in 0..300 {
+        let a = Genome::random(&mut rng);
+        let b = Genome::random(&mut rng);
+        founders.push(a.distance(&b));
+    }
+    stats("two founders", &mut founders);
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let seed: u32 = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(1);
@@ -32,6 +86,7 @@ fn main() {
             "solo" => cfg.solo_after = f,
             "season" => cfg.season_depth = f,
             "period" => cfg.season_period = f,
+            "hybrid" => cfg.hybrid_cost = f,
             other => panic!("unknown override {other}"),
         }
     }
@@ -62,6 +117,7 @@ fn main() {
     }
     let total = start.elapsed().as_secs_f64();
     println!("{ticks} ticks in {total:.2}s = {:.0} ticks/s", ticks as f64 / total);
+    distance_report(&w);
     let c = &w.chronicle;
     let names = ["first hunters", "hunters gone", "boom", "crash", "lineage lost", "lineage dominant", "generation", "washed in", "quiet", "speciation"];
     println!("chronicle ({} events, showing last {}):", c.total, c.len.min(25));

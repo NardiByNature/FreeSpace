@@ -82,6 +82,25 @@ impl Genome {
         }
     }
 
+    /// How different two genomes are, in [0, 1]: mostly the brain (mean
+    /// absolute weight difference over the full weight span), partly the
+    /// body. Hue and mate preference are left out on purpose: hue is the
+    /// signal choosiness reads, not an incompatibility in itself.
+    pub fn distance(&self, other: &Genome) -> f32 {
+        let mut acc = 0.0f32;
+        for (a, b) in self.weights.iter().zip(other.weights.iter()) {
+            acc += (a - b).abs();
+        }
+        let brain = acc / (N_W as f32 * 2.0 * W_LIMIT);
+        let body = ((self.size - other.size).abs() / (SIZE_MAX - SIZE_MIN)
+            + (self.speed - other.speed).abs() / (SPEED_MAX - SPEED_MIN)
+            + (self.sense_range - other.sense_range).abs() / (SENSE_MAX - SENSE_MIN)
+            + (self.diet - other.diet).abs()
+            + (self.reproduce_at - other.reproduce_at).abs() / (REPRO_MAX - REPRO_MIN))
+            / 5.0;
+        (0.7 * brain + 0.3 * body).clamp(0.0, 1.0)
+    }
+
     /// Would a creature with this genome accept `other` as a mate?
     #[inline]
     pub fn accepts(&self, other: &Genome) -> bool {
@@ -263,6 +282,21 @@ mod tests {
             assert!(c.diet == a.diet || c.diet == b.diet);
             assert!(c.hue == a.hue || c.hue == b.hue);
         }
+    }
+
+    #[test]
+    fn distance_is_a_metric_like_thing() {
+        let mut rng = Rng::new(13);
+        let a = Genome::random(&mut rng);
+        let b = Genome::random(&mut rng);
+        assert_eq!(a.distance(&a), 0.0);
+        assert!((a.distance(&b) - b.distance(&a)).abs() < 1e-7);
+        assert!((0.0..=1.0).contains(&a.distance(&b)));
+        let mut kid = a.clone();
+        for _ in 0..5 {
+            kid = kid.mutate(&mut rng);
+        }
+        assert!(a.distance(&kid) < a.distance(&b), "child {} random {}", a.distance(&kid), a.distance(&b));
     }
 
     #[test]

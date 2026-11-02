@@ -45,12 +45,15 @@ cargo install wasm-pack
 | new world | type a seed (or leave blank for random), pick the rule, press New world |
 | save / load | a `.tdpl` snapshot restores the exact state, RNG included |
 | rewind | click a dot on the timeline strip, or `[` for the previous checkpoint |
+| share a moment | Copy link writes a URL with the tick; opening it replays to that exact tick |
 | add life | drops 50 random founders in, for when a dish goes quiet |
 | specimens | Copy genome / Keep specimen on a creature; Paste genome drops 20 copies in |
 
-The URL carries the seed and the rule (`#seed=…`, `#seed=…&sexual`). The
-same seed always produces the same run, in every browser, because the whole
-simulation is one WebAssembly module with no platform-dependent maths in it.
+The URL carries the seed, the rule, and optionally a tick
+(`#seed=1&t=51070`). The same seed always produces the same run, in every
+browser, because the whole simulation is one WebAssembly module with no
+platform-dependent maths in it. That is what makes a moment link work: the
+page simply replays from zero at full speed and lands on the tick.
 
 ## Watching it
 
@@ -73,6 +76,11 @@ draws its path.
 
 **Specimens.** Any creature's genome fits in a 700-character code. Copy it,
 keep it in the browser with a name, drop twenty copies into another world.
+
+**Seasons.** Soil productivity follows a slow cosine, 16,000 ticks per cycle,
+down to 55% at midwinter. The dish never quite settles: populations swing by
+roughly a third with the seasons, lean winters cull the slow and the
+short-sighted, and the readout tells you where in the year you are.
 
 ## How it works
 
