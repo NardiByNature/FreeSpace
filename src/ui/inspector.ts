@@ -1,4 +1,5 @@
 import { F, I, type Core, type Sim } from "../wasm.js";
+import { describe, parseEvents } from "./chronicle.js";
 
 // Trait display ranges, mirroring the clamps in core/src/genome.rs.
 const TRAIT_RANGES: [number, number][] = [
@@ -24,6 +25,8 @@ export class Inspector {
   private vals = new Map<string, HTMLElement>();
   private bars = new Map<string, HTMLElement>();
   private brain: HTMLCanvasElement | null = null;
+  private chronicleList: HTMLElement | null = null;
+  private seenEvents = -1;
   followBox: HTMLInputElement | null = null;
   onFollowChange: ((on: boolean) => void) | null = null;
 
@@ -50,6 +53,34 @@ export class Inspector {
     set("diet", h[r + F.meanDiet].toFixed(2));
     const cap = sim.nutrient_capacity() * sim.grid_cols() * sim.grid_rows();
     set("soil", `${Math.round((h[r + F.nutrients] / cap) * 100)}%`);
+    this.updateChronicle(sim);
+  }
+
+  private updateChronicle(sim: Sim): void {
+    const list = this.chronicleList;
+    if (!list) return;
+    const total = sim.event_total();
+    if (total === this.seenEvents) return;
+    this.seenEvents = total;
+    const events = parseEvents(sim.events(40)).reverse();
+    list.replaceChildren();
+    if (events.length === 0) {
+      list.append(el("p", undefined, "Nothing yet. The first entries usually arrive within a few thousand ticks."));
+      return;
+    }
+    for (const e of events) {
+      const d = describe(e);
+      const row = el("div", "ev");
+      const t = el("span", "t", `t ${Math.round(e.tick).toLocaleString()}`);
+      row.append(t);
+      if (d.hue !== undefined) {
+        const sw = el("span", "swatch");
+        sw.style.background = `hsl(${d.hue * 360} 72% 60%)`;
+        row.append(sw);
+      }
+      row.append(document.createTextNode(d.text));
+      list.append(row);
+    }
   }
 
   private buildWorld(core: Core): void {
@@ -93,6 +124,11 @@ export class Inspector {
     add2("sense", "sense range");
     add2("diet", "diet (0 plant … 1 meat)");
     this.root.append(kv2);
+    this.root.append(el("h3", undefined, "Chronicle"));
+    const list = el("div", "chronicle");
+    this.root.append(list);
+    this.chronicleList = list;
+    this.seenEvents = -1;
     void core;
   }
 
@@ -277,5 +313,6 @@ export class Inspector {
 
   reset(): void {
     this.mode = null;
+    this.chronicleList = null;
   }
 }

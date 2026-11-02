@@ -3,11 +3,11 @@
 //! Canonical layout: two worlds in the same state produce the same bytes.
 
 use crate::genome::{Genome, N_HID, N_IN, N_OUT, N_W};
-use crate::stats::SAMPLE_STRIDE;
+use crate::stats::{HUE_BINS, SAMPLE_STRIDE};
 use crate::world::{Config, World};
 
 pub const MAGIC: &[u8; 4] = b"TDPL";
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 
 struct Writer {
     buf: Vec<u8>,
@@ -96,6 +96,7 @@ impl World {
         w.u32(self.tally.births);
         w.u32(self.tally.deaths);
         w.u32(self.tally.bites);
+        w.u32(self.tally.washed);
         w.f32(self.tally.approach_sum);
         w.u32(self.tally.approach_n);
 
@@ -145,6 +146,27 @@ impl World {
         for i in 0..h.len {
             w.f32s(h.row(i));
         }
+
+        let c = &self.chronicle;
+        w.u32(c.total);
+        w.u32(c.samples);
+        w.u8(c.has_hunters as u8);
+        w.u8(c.was_quiet as u8);
+        w.u32(c.last_boom);
+        w.u32(c.last_crash);
+        w.u32(c.gen_milestone);
+        w.f32s(&c.bin_peak);
+        for d in c.bin_dominant {
+            w.u8(d as u8);
+        }
+        w.u32(c.len as u32);
+        for i in 0..c.len {
+            let e = c.event(i);
+            w.u32(e.tick);
+            w.u32(e.kind as u32);
+            w.f32(e.a);
+            w.f32(e.b);
+        }
         w.buf
     }
 
@@ -155,7 +177,7 @@ impl World {
         }
         let version = r.u32()?;
         if version != VERSION {
-            return Err(format!("snapshot version {version} not supported (want {VERSION})"));
+            return Err(format!("this snapshot is format {version}; this build reads format {VERSION}"));
         }
         let mut fields = [0.0f32; Config::N_FIELDS];
         r.f32s(&mut fields)?;
@@ -172,6 +194,7 @@ impl World {
         w.tally.births = r.u32()?;
         w.tally.deaths = r.u32()?;
         w.tally.bites = r.u32()?;
+        w.tally.washed = r.u32()?;
         w.tally.approach_sum = r.f32()?;
         w.tally.approach_n = r.u32()?;
 
@@ -248,6 +271,31 @@ impl World {
             r.f32s(&mut row)?;
             w.history.push(&row);
         }
+
+        let c = &mut w.chronicle;
+        let total = r.u32()?;
+        c.samples = r.u32()?;
+        c.has_hunters = r.u8()? != 0;
+        c.was_quiet = r.u8()? != 0;
+        c.last_boom = r.u32()?;
+        c.last_crash = r.u32()?;
+        c.gen_milestone = r.u32()?;
+        r.f32s(&mut c.bin_peak)?;
+        for b in 0..HUE_BINS {
+            c.bin_dominant[b] = r.u8()? != 0;
+        }
+        let n = r.u32()? as usize;
+        if n > crate::stats::EVENT_CAP {
+            return Err("too many events in snapshot".into());
+        }
+        for _ in 0..n {
+            let tick = r.u32()?;
+            let kind = r.u32()? as u16;
+            let a = r.f32()?;
+            let b = r.f32()?;
+            c.push(tick, kind, a, b);
+        }
+        c.total = total;
         Ok(w)
     }
 }

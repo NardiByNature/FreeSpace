@@ -51,4 +51,11 @@ fn main() {
     }
     let total = start.elapsed().as_secs_f64();
     println!("{ticks} ticks in {total:.2}s = {:.0} ticks/s", ticks as f64 / total);
+    let c = &w.chronicle;
+    let names = ["first hunters", "hunters gone", "boom", "crash", "lineage lost", "lineage dominant", "generation", "washed in", "quiet", "speciation"];
+    println!("chronicle ({} events, showing last {}):", c.total, c.len.min(25));
+    for i in c.len.saturating_sub(25)..c.len {
+        let e = c.event(i);
+        println!("  t{:>7}  {:<17} a={:.3} b={:.3}", e.tick, names.get(e.kind as usize).unwrap_or(&"?"), e.a, e.b);
+    }
 }

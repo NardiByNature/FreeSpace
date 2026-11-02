@@ -1,4 +1,5 @@
 import { F, type Core, type Sim } from "../wasm.js";
+import { describe, parseEvents, type EventRow } from "./chronicle.js";
 
 function fit(canvas: HTMLCanvasElement): CanvasRenderingContext2D | null {
   const dpr = window.devicePixelRatio || 1;
@@ -28,19 +29,20 @@ export class Charts {
 
   draw(core: Core, sim: Sim, force = false): void {
     const len = sim.history_len();
-    const key = `${len}:${sim.history_head()}:${this.pop.clientWidth}`;
+    const key = `${len}:${sim.history_head()}:${this.pop.clientWidth}:${sim.event_total()}`;
     if (!force && key === this.lastKey) return;
     this.lastKey = key;
     const hist = core.history(sim);
     const stride = core.layout.sampleStride;
     const rows: number[] = [];
     for (let i = 0; i < len; i++) rows.push(core.historyRowStart(sim, i));
-    this.drawPop(hist, rows, stride);
+    const events = parseEvents(sim.events(64));
+    this.drawPop(hist, rows, stride, events);
     this.drawHue(hist, rows, core.layout.nFields, core.layout.hueBins);
     this.drawApproach(hist, rows);
   }
 
-  private drawPop(h: Float32Array, rows: number[], _stride: number): void {
+  private drawPop(h: Float32Array, rows: number[], _stride: number, events: EventRow[]): void {
     const ctx = fit(this.pop);
     if (!ctx) return;
     const w = this.pop.clientWidth;
@@ -77,6 +79,29 @@ export class Charts {
       ctx.fill();
       ctx.globalAlpha = 1;
       for (let i = 0; i < n; i++) base[i] += h[rows[i] + field];
+    }
+    // Chronicle marks: a hairline and a glyph where each event happened.
+    const t0 = h[rows[0] + F.tick];
+    const t1 = h[rows[n - 1] + F.tick];
+    if (t1 > t0) {
+      ctx.font = "10px ui-sans-serif, system-ui";
+      ctx.textAlign = "center";
+      let lastX = -20;
+      let lane = 0;
+      for (const e of events) {
+        if (e.tick < t0) continue;
+        const ex = ((e.tick - t0) / (t1 - t0)) * w;
+        const d = describe(e);
+        lane = ex - lastX < 10 ? (lane + 1) % 3 : 0;
+        lastX = ex;
+        ctx.strokeStyle = "rgba(214,222,232,0.22)";
+        ctx.beginPath();
+        ctx.moveTo(ex, top + 10 + lane * 11);
+        ctx.lineTo(ex, hh);
+        ctx.stroke();
+        ctx.fillStyle = d.hue !== undefined ? `hsl(${d.hue * 360} 72% 62%)` : "#d6dee8";
+        ctx.fillText(d.glyph, ex, top + 6 + lane * 11);
+      }
     }
     ctx.fillStyle = "#7f8ea0";
     ctx.font = "10px ui-sans-serif, system-ui";

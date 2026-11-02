@@ -29,8 +29,155 @@ pub struct Tally {
     pub births: u32,
     pub deaths: u32,
     pub bites: u32,
+    pub washed: u32,
     pub approach_sum: f32,
     pub approach_n: u32,
+}
+
+// ---- Chronicle: milestones the world notices about itself ----
+
+pub const EV_FIRST_HUNTERS: u16 = 0;
+pub const EV_HUNTERS_GONE: u16 = 1;
+pub const EV_BOOM: u16 = 2;
+pub const EV_CRASH: u16 = 3;
+pub const EV_LINEAGE_LOST: u16 = 4;
+pub const EV_LINEAGE_DOMINANT: u16 = 5;
+pub const EV_GENERATION: u16 = 6;
+pub const EV_WASHED_IN: u16 = 7;
+pub const EV_QUIET: u16 = 8;
+pub const EV_SPECIATION: u16 = 9;
+
+pub const EVENT_CAP: usize = 256;
+/// Samples between the two population readings compared for boom/crash.
+const SWING_SPAN: usize = 100;
+const SWING_COOLDOWN: u32 = 200;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Event {
+    pub tick: u32,
+    pub kind: u16,
+    pub a: f32,
+    pub b: f32,
+}
+
+/// Watches each sample row and records events. Holds the little state the
+/// detectors need (flags, cooldowns, decaying per-bin peaks) so the same
+/// story can repeat: hunters can appear, vanish, and appear again.
+pub struct Chronicle {
+    pub events: Vec<Event>,
+    pub head: usize,
+    pub len: usize,
+    /// Monotonic count of events ever recorded, so a reader can tell when there are new ones.
+    pub total: u32,
+    pub samples: u32,
+    pub has_hunters: bool,
+    pub was_quiet: bool,
+    pub last_boom: u32,
+    pub last_crash: u32,
+    pub gen_milestone: u32,
+    pub bin_peak: [f32; HUE_BINS],
+    pub bin_dominant: [bool; HUE_BINS],
+}
+
+impl Default for Chronicle {
+    fn default() -> Chronicle {
+        Chronicle {
+            events: vec![Event { tick: 0, kind: 0, a: 0.0, b: 0.0 }; EVENT_CAP],
+            head: 0,
+            len: 0,
+            total: 0,
+            samples: 0,
+            has_hunters: false,
+            was_quiet: false,
+            last_boom: 0,
+            last_crash: 0,
+            gen_milestone: 0,
+            bin_peak: [0.0; HUE_BINS],
+            bin_dominant: [false; HUE_BINS],
+        }
+    }
+}
+
+impl Chronicle {
+    pub fn push(&mut self, tick: u32, kind: u16, a: f32, b: f32) {
+        self.events[self.head] = Event { tick, kind, a, b };
+        self.head = (self.head + 1) % EVENT_CAP;
+        if self.len < EVENT_CAP {
+            self.len += 1;
+        }
+        self.total = self.total.wrapping_add(1);
+    }
+
+    /// Event `i` counting from the oldest retained.
+    pub fn event(&self, i: usize) -> Event {
+        self.events[(self.head + EVENT_CAP - self.len + i) % EVENT_CAP]
+    }
+
+    /// Inspect the newest sample (already pushed to `history`) and the tally
+    /// for the interval it covers.
+    pub fn observe(&mut self, history: &History, washed: u32) {
+        let Some(row) = history.latest() else { return };
+        let tick = row[F_TICK] as u32;
+        let pop = row[F_POP];
+        let carn = row[F_CARN] as u32;
+        self.samples += 1;
+
+        if washed > 0 {
+            self.push(tick, EV_WASHED_IN, washed as f32, 0.0);
+        }
+
+        if carn >= 5 && !self.has_hunters {
+            self.has_hunters = true;
+            self.push(tick, EV_FIRST_HUNTERS, carn as f32, 0.0);
+        } else if carn == 0 && self.has_hunters {
+            self.has_hunters = false;
+            self.push(tick, EV_HUNTERS_GONE, 0.0, 0.0);
+        }
+
+        let quiet = pop <= 0.0;
+        if quiet && !self.was_quiet {
+            self.push(tick, EV_QUIET, 0.0, 0.0);
+        }
+        self.was_quiet = quiet;
+
+        if history.len > SWING_SPAN {
+            let before = history.row(history.len - 1 - SWING_SPAN)[F_POP];
+            if before >= 50.0 && pop >= before * 1.6 && self.samples - self.last_boom >= SWING_COOLDOWN {
+                self.last_boom = self.samples;
+                self.push(tick, EV_BOOM, pop, before);
+            }
+            if before >= 100.0 && pop <= before * 0.6 && self.samples - self.last_crash >= SWING_COOLDOWN {
+                self.last_crash = self.samples;
+                self.push(tick, EV_CRASH, pop, before);
+            }
+        }
+
+        let gen = row[F_GENERATION] as u32;
+        if gen / 100 > self.gen_milestone {
+            self.gen_milestone = gen / 100;
+            self.push(tick, EV_GENERATION, (self.gen_milestone * 100) as f32, 0.0);
+        }
+
+        if pop > 0.0 {
+            for b in 0..HUE_BINS {
+                let share = row[N_FIELDS + b] / pop;
+                let hue = (b as f32 + 0.5) / HUE_BINS as f32;
+                if share <= 0.0 && self.bin_peak[b] >= 0.04 {
+                    self.push(tick, EV_LINEAGE_LOST, hue, self.bin_peak[b]);
+                    self.bin_peak[b] = 0.0;
+                } else {
+                    // Decaying peak: remembers roughly the last few hundred samples.
+                    self.bin_peak[b] = share.max(self.bin_peak[b] * 0.995);
+                }
+                if share >= 0.30 && !self.bin_dominant[b] {
+                    self.bin_dominant[b] = true;
+                    self.push(tick, EV_LINEAGE_DOMINANT, hue, share);
+                } else if share < 0.15 {
+                    self.bin_dominant[b] = false;
+                }
+            }
+        }
+    }
 }
 
 pub struct History {
@@ -80,6 +227,18 @@ impl History {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chronicle_ring_and_total() {
+        let mut c = Chronicle::default();
+        for t in 0..(EVENT_CAP as u32 + 10) {
+            c.push(t, EV_BOOM, 0.0, 0.0);
+        }
+        assert_eq!(c.len, EVENT_CAP);
+        assert_eq!(c.total, EVENT_CAP as u32 + 10);
+        assert_eq!(c.event(0).tick, 10);
+        assert_eq!(c.event(c.len - 1).tick, EVENT_CAP as u32 + 9);
+    }
 
     #[test]
     fn ring_buffer_keeps_newest() {

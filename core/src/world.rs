@@ -8,7 +8,7 @@ use crate::genome::{Genome, N_HID, N_IN, N_OUT, SENSE_MAX};
 use crate::plants::{Nutrients, Plants};
 use crate::rng::Rng;
 use crate::spatial::{Hit, SpatialHash};
-use crate::stats::{self, History, Tally, HUE_BINS, SAMPLE_STRIDE};
+use crate::stats::{self, Chronicle, History, Tally, HUE_BINS, SAMPLE_STRIDE};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Config {
@@ -314,6 +314,7 @@ pub struct World {
     pub plants: Plants,
     pub creatures: Creatures,
     pub history: History,
+    pub chronicle: Chronicle,
     pub tally: Tally,
     plant_hash: SpatialHash,
     creature_hash: SpatialHash,
@@ -415,6 +416,7 @@ impl World {
             plants: Plants::new(cfg.max_plants as usize),
             creatures: Creatures::new(cfg.max_creatures as usize),
             history: History::new(cfg.history_cap as usize, cfg.history_every),
+            chronicle: Chronicle::default(),
             tally: Tally::default(),
             plant_hash: SpatialHash::new(cfg.width, cfg.height, cfg.spatial_cell),
             creature_hash: SpatialHash::new(cfg.width, cfg.height, cfg.spatial_cell),
@@ -695,7 +697,28 @@ impl World {
             let id = self.next_id;
             self.next_id += 1;
             self.creatures.spawn(id, x, y, h, e, 0, g);
+            self.tally.washed += 1;
         }
+    }
+
+    /// Place `n` copies of a genome at random positions with founder energy.
+    /// Returns how many fit. Used by specimens and by tests.
+    pub fn spawn_genome(&mut self, g: &Genome, n: u32) -> u32 {
+        let mut placed = 0;
+        for _ in 0..n {
+            if self.creatures.is_full() {
+                break;
+            }
+            let x = self.rng.range(0.0, self.cfg.width);
+            let y = self.rng.range(0.0, self.cfg.height);
+            let h = self.rng.range(-core::f32::consts::PI, core::f32::consts::PI);
+            let e = g.max_energy() * 0.5;
+            let id = self.next_id;
+            self.next_id += 1;
+            self.creatures.spawn(id, x, y, h, e, 0, g.clone());
+            placed += 1;
+        }
+        placed
     }
 
     /// Drop `n` fresh founders in. Exposed for the UI's "add life" button.
@@ -761,6 +784,7 @@ impl World {
         row[stats::F_GENERATION] = max_gen as f32;
         row[stats::F_BITES] = self.tally.bites as f32;
         self.history.push(&row);
+        self.chronicle.observe(&self.history, self.tally.washed);
         self.tally = Tally::default();
     }
 

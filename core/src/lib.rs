@@ -218,6 +218,23 @@ impl Sim {
         self.world.history.every
     }
 
+    // ---- chronicle ----
+    /// Monotonic count of events ever recorded; poll it to notice new ones.
+    pub fn event_total(&self) -> u32 {
+        self.world.chronicle.total
+    }
+    /// The newest `n` events, oldest first, as flat [tick, kind, a, b] rows.
+    pub fn events(&self, n: u32) -> Vec<f32> {
+        let c = &self.world.chronicle;
+        let n = (n as usize).min(c.len);
+        let mut out = Vec::with_capacity(n * 4);
+        for i in (c.len - n)..c.len {
+            let e = c.event(i);
+            out.extend_from_slice(&[e.tick as f32, e.kind as f32, e.a, e.b]);
+        }
+        out
+    }
+
     // ---- interventions ----
     pub fn spawn_founders(&mut self, n: u32) {
         self.world.spawn_founders(n);

@@ -52,6 +52,10 @@ input[type=text] { background: #0b1016; color: var(--text); border: 1px solid va
 .trait .v { text-align: right; }
 .trait .bar { margin: 0; }
 .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 50%; vertical-align: -2px; margin-right: 6px; }
+.chronicle { display: flex; flex-direction: column; gap: 6px; }
+.chronicle .ev { line-height: 1.4; color: var(--text); }
+.chronicle .ev .t { color: var(--muted); font-variant-numeric: tabular-nums; margin-right: 8px; font-size: 11px; }
+.chronicle .ev .swatch { width: 10px; height: 10px; margin-right: 5px; }
 #brain { display: block; width: 100%; height: 300px; margin-top: 4px; background: #0b1016; border-radius: 8px; }
 .row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
 label.chk { color: var(--muted); display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
