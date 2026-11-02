@@ -7,6 +7,8 @@ import { Timeline, TimelineView } from "./timeline.js";
 import { toast } from "./toast.js";
 
 const FRAME_BUDGET_MS = 13;
+/** Longest fast-forward a moment link may ask for. */
+const MAX_FAST_FORWARD = 2_000_000;
 /** Simulation ticks per second at 1x, independent of display refresh rate. */
 const BASE_TPS = 60;
 const MAX_TICKS_PER_FRAME = 64;
@@ -34,6 +36,9 @@ export class App {
   private follow = false;
   /** Recent positions of the selected creature, for the trail. */
   private trail: number[] = [];
+  /** When > 0, run at full speed until this tick (moment links). */
+  private fastTo = 0;
+  private speedBeforeFast = 1;
   private frame = 0;
   private lastFrameTime = performance.now();
   private tickDebt = 0;
@@ -47,12 +52,14 @@ export class App {
     plants: $("plants"),
     gen: $("gen"),
     tps: $("tps"),
+    season: $("season"),
+    seasonWord: $("seasonword"),
     seed: $<HTMLInputElement>("seed"),
     sexual: $<HTMLInputElement>("sexual"),
     file: $<HTMLInputElement>("file"),
   };
 
-  constructor(private readonly core: Core, seed: number, sexual: boolean) {
+  constructor(private readonly core: Core, seed: number, sexual: boolean, targetTick = 0) {
     this.sim = new Sim(seed, sexual);
     this.cam = new Camera(this.sim.width(), this.sim.height());
     this.renderer = new Renderer(this.canvas);
@@ -70,10 +77,20 @@ export class App {
       if (!m) return;
       const seed = Number(m[1]) >>> 0;
       const sexual = /(^|[#&])sexual(&|$)/.test(location.hash);
-      if (seed !== this.sim.seed() || sexual !== this.sim.sexual()) {
+      const tm = /(^|[#&])t=(\d+)/.exec(location.hash);
+      const t = tm ? Number(tm[2]) : 0;
+      if (seed !== this.sim.seed() || sexual !== this.sim.sexual() || (t > 0 && t < this.sim.tick())) {
         this.els.sexual.checked = sexual;
         this.newWorld(seed);
       }
+      if (t > 0) this.fastForwardTo(t);
+    });
+    $("link").addEventListener("click", () => {
+      const url = this.momentLink();
+      navigator.clipboard
+        .writeText(url)
+        .then(() => toast(`Link copied. It replays seed ${this.sim.seed()} to t ${this.sim.tick().toLocaleString()}.`, 4000))
+        .catch(() => window.prompt("Copy this link:", url));
     });
     this.charts = new Charts($<HTMLCanvasElement>("popchart"), $<HTMLCanvasElement>("huechart"), $<HTMLCanvasElement>("approachchart"));
     this.timelineView = new TimelineView($<HTMLCanvasElement>("timeline"), this.timeline);
@@ -89,7 +106,37 @@ export class App {
     window.addEventListener("resize", () => this.layout());
     // Handy from the devtools console.
     (window as unknown as { tidepool: App }).tidepool = this;
+    if (targetTick > 0) this.fastForwardTo(targetTick);
     requestAnimationFrame(() => this.loop());
+  }
+
+  /** Run flat out until `tick`, then drop back to the previous speed. */
+  fastForwardTo(tick: number): void {
+    if (tick > MAX_FAST_FORWARD) {
+      toast(`That link asks for t ${tick.toLocaleString()}; the most a link will replay is ${MAX_FAST_FORWARD.toLocaleString()}.`, 8000);
+      tick = MAX_FAST_FORWARD;
+    }
+    if (tick <= this.sim.tick()) return;
+    if (this.fastTo === 0) this.speedBeforeFast = this.speed || 1;
+    this.fastTo = tick;
+    this.playing = true;
+    this.els.play.textContent = "Pause";
+    document.querySelectorAll<HTMLButtonElement>("#speed button").forEach((b) => (b.disabled = true));
+  }
+
+  private endFastForward(): void {
+    this.fastTo = 0;
+    this.speed = this.speedBeforeFast;
+    document.querySelectorAll<HTMLButtonElement>("#speed button").forEach((b) => {
+      b.disabled = false;
+      b.classList.toggle("on", Number(b.dataset.s) === this.speed);
+    });
+    toast(`Arrived at t ${this.sim.tick().toLocaleString()}.`, 3000);
+  }
+
+  private momentLink(): string {
+    const rule = this.sim.sexual() ? "&sexual" : "";
+    return `${location.origin}${location.pathname}#seed=${this.sim.seed()}${rule}&t=${this.sim.tick()}`;
   }
 
   /** The live simulation handle (replaced on new world / load). */
@@ -163,6 +210,7 @@ export class App {
     this.els.play.addEventListener("click", () => this.togglePlay());
     for (const b of document.querySelectorAll<HTMLButtonElement>("#speed button")) {
       b.addEventListener("click", () => {
+        if (this.fastTo > 0) return;
         this.speed = Number(b.dataset.s);
         document.querySelectorAll("#speed button").forEach((x) => x.classList.toggle("on", x === b));
       });
@@ -301,6 +349,16 @@ export class App {
       this.tickDebt = 0;
       return;
     }
+    if (this.fastTo > 0) {
+      const start = performance.now();
+      let chunk = 8;
+      while (performance.now() - start < FRAME_BUDGET_MS && this.sim.tick() < this.fastTo) {
+        this.sim.step(Math.min(chunk, this.fastTo - this.sim.tick()));
+        chunk = Math.min(MAX_TICKS_PER_FRAME, chunk * 2);
+      }
+      if (this.sim.tick() >= this.fastTo) this.endFastForward();
+      return;
+    }
     if (this.speed > 0) {
       // Real-time pacing: owe BASE_TPS * speed ticks per second, whatever the refresh rate.
       this.tickDebt += dt * BASE_TPS * this.speed;
@@ -385,5 +443,14 @@ export class App {
     this.els.plants.textContent = this.sim.plant_count().toLocaleString();
     this.els.gen.textContent = String(this.sim.max_generation());
     this.els.tps.textContent = this.playing ? String(Math.round(tps)) : "–";
+    const phase = this.sim.season_phase();
+    const [glyph, word] = phase < 0.125 || phase >= 0.875 ? ["☀", "high summer"] : phase < 0.375 ? ["☁", "autumn"] : phase < 0.625 ? ["❄", "deep winter"] : ["☂", "spring"];
+    const label = `${glyph} `;
+    if (this.els.season.firstChild && this.els.season.firstChild.textContent !== label) this.els.season.firstChild.textContent = label;
+    if (this.els.seasonWord.textContent !== word) this.els.seasonWord.textContent = word;
+    if (this.fastTo > 0) {
+      const pct = Math.min(100, Math.round((tick / this.fastTo) * 100));
+      toast(`Fast-forwarding to t ${this.fastTo.toLocaleString()} … ${pct}%`, 60_000);
+    }
   }
 }

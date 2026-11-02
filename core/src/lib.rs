@@ -59,6 +59,14 @@ impl Sim {
     pub fn sexual(&self) -> bool {
         self.world.cfg.sexual
     }
+    /// Seasonal soil multiplier for the current tick (1 at midsummer).
+    pub fn season(&self) -> f32 {
+        self.world.season_factor()
+    }
+    /// Position in the seasonal cycle, [0, 1), 0 = midsummer.
+    pub fn season_phase(&self) -> f32 {
+        self.world.season_phase()
+    }
 
     fn wrap(world: World) -> Sim {
         Sim { world, creature_view: Vec::new(), plant_view: Vec::new() }

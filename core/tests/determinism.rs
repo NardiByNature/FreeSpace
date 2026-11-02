@@ -64,6 +64,26 @@ fn sexual_worlds_are_deterministic_and_restorable() {
 }
 
 #[test]
+fn seasons_are_deterministic_and_bounded() {
+    let mut c = cfg();
+    c.season_depth = 0.45;
+    c.season_period = 4_000.0;
+    let mut a = World::new(31, c.clone());
+    let mut b = World::new(31, c);
+    a.step(2_000);
+    b.step(2_000);
+    assert_eq!(a.snapshot(), b.snapshot());
+    // Midwinter at half a period: factor is 1 - depth.
+    assert!((a.season_factor() - 0.55).abs() < 1e-4, "{}", a.season_factor());
+    a.step(2_000);
+    assert!((a.season_factor() - 1.0).abs() < 1e-4, "{}", a.season_factor());
+    let mut flat = cfg();
+    flat.season_depth = 0.0;
+    let w = World::new(31, flat);
+    assert_eq!(w.season_factor(), 1.0);
+}
+
+#[test]
 fn rejects_garbage() {
     assert!(World::restore(b"nope").is_err());
     let mut a = World::new(1, cfg());

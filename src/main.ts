@@ -11,8 +11,10 @@ async function main(): Promise<void> {
   const core = await Core.load();
   const seed = seedFromHash();
   const sexual = /(^|[#&])sexual(?:=(?:1|true))?(&|$)/.test(location.hash);
-  history.replaceState(null, "", `#seed=${seed}${sexual ? "&sexual" : ""}`);
-  new App(core, seed, sexual);
+  const tm = /(^|[#&])t=(\d+)/.exec(location.hash);
+  const targetTick = tm ? Number(tm[2]) : 0;
+  history.replaceState(null, "", `#seed=${seed}${sexual ? "&sexual" : ""}${targetTick > 0 ? `&t=${targetTick}` : ""}`);
+  new App(core, seed, sexual, targetTick);
 }
 
 main().catch((err: unknown) => {

@@ -30,6 +30,8 @@ fn main() {
             "reach" => cfg.bite_reach = f,
             "sexual" => cfg.sexual = f > 0.5,
             "solo" => cfg.solo_after = f,
+            "season" => cfg.season_depth = f,
+            "period" => cfg.season_period = f,
             other => panic!("unknown override {other}"),
         }
     }

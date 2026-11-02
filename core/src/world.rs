@@ -58,6 +58,10 @@ pub struct Config {
     pub solo_after: f32,
     /// A partner must be within this multiple of the two bodies' radii.
     pub mate_reach: f32,
+    /// Ticks per seasonal cycle of soil productivity.
+    pub season_period: f32,
+    /// How lean the depth of winter is: soil capacity falls to (1 - depth). 0 disables seasons.
+    pub season_depth: f32,
 }
 
 impl Default for Config {
@@ -99,12 +103,14 @@ impl Default for Config {
             sexual: false,
             solo_after: 600.0,
             mate_reach: 3.0,
+            season_period: 16_000.0,
+            season_depth: 0.45,
         }
     }
 }
 
 impl Config {
-    pub const N_FIELDS: usize = 36;
+    pub const N_FIELDS: usize = 38;
     /// Flat f32 encoding for snapshots. Integers survive exactly below 2^24.
     pub fn to_fields(&self) -> [f32; Self::N_FIELDS] {
         [
@@ -144,6 +150,8 @@ impl Config {
             if self.sexual { 1.0 } else { 0.0 },
             self.solo_after,
             self.mate_reach,
+            self.season_period,
+            self.season_depth,
         ]
     }
     pub fn from_fields(f: &[f32; Self::N_FIELDS]) -> Config {
@@ -190,6 +198,8 @@ impl Config {
             sexual: next() > 0.5,
             solo_after: next(),
             mate_reach: next(),
+            season_period: next(),
+            season_depth: next(),
         }
     }
 }
@@ -446,6 +456,22 @@ impl World {
         self.creatures.count()
     }
 
+    /// Where in the seasonal cycle we are, in [0, 1). 0 is the peak of summer.
+    pub fn season_phase(&self) -> f32 {
+        let p = self.cfg.season_period.max(1.0) as u32;
+        (self.tick % p) as f32 / p as f32
+    }
+
+    /// Soil productivity multiplier for this tick: 1 at midsummer, 1 - depth at midwinter.
+    pub fn season_factor(&self) -> f32 {
+        let depth = self.cfg.season_depth;
+        if depth <= 0.0 {
+            return 1.0;
+        }
+        let c = crate::fastmath::cos(crate::fastmath::TAU * self.season_phase());
+        1.0 - depth * (0.5 - 0.5 * c)
+    }
+
     pub fn step(&mut self, n: u32) {
         for _ in 0..n {
             self.tick_once();
@@ -467,8 +493,9 @@ impl World {
     }
 
     fn grow(&mut self) {
+        let season = self.season_factor();
         let cfg = &self.cfg;
-        self.nutrients.regrow(cfg.regrow_rate);
+        self.nutrients.regrow(cfg.regrow_rate, season);
         if self.tick % cfg.diffuse_every == 0 {
             self.nutrients.diffuse(cfg.diffuse_k);
         }

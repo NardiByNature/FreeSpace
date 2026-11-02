@@ -33,10 +33,10 @@ impl Nutrients {
         cy * self.cols + cx
     }
 
-    /// Logistic-ish regrowth toward capacity.
-    pub fn regrow(&mut self, rate: f32) {
+    /// Regrowth toward capacity scaled by the season (1 = full capacity).
+    pub fn regrow(&mut self, rate: f32, season: f32) {
         for (l, c) in self.level.iter_mut().zip(self.capacity.iter()) {
-            *l += rate * (*c - *l);
+            *l += rate * (*c * season - *l);
         }
     }
 
@@ -169,7 +169,7 @@ mod tests {
         let mut n = Nutrients::new(100.0, 100.0, 4, 4, 100.0);
         n.level.iter_mut().for_each(|l| *l = 0.0);
         for _ in 0..5_000 {
-            n.regrow(0.001);
+            n.regrow(0.001, 1.0);
         }
         assert!(n.level.iter().all(|l| *l > 99.0));
     }
