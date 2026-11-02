@@ -3,9 +3,11 @@
 //! best hit is closer than the next ring can be. No allocation per query.
 
 pub struct SpatialHash {
-    pub cell: f32,
     pub cols: usize,
     pub rows: usize,
+    /// Exact cell size in world units (width / cols), so the grid tiles the torus evenly.
+    pub cell_w: f32,
+    pub cell_h: f32,
     width: f32,
     height: f32,
     /// cell_start[c]..cell_start[c+1] indexes `items` for cell c.
@@ -24,13 +26,16 @@ pub struct Hit {
 }
 
 impl SpatialHash {
+    /// `cell` is a target size; the real cell size is rounded so a whole
+    /// number of cells spans each axis.
     pub fn new(width: f32, height: f32, cell: f32) -> SpatialHash {
-        let cols = (width / cell).ceil() as usize;
-        let rows = (height / cell).ceil() as usize;
+        let cols = ((width / cell).round() as usize).max(1);
+        let rows = ((height / cell).round() as usize).max(1);
         SpatialHash {
-            cell,
             cols,
             rows,
+            cell_w: width / cols as f32,
+            cell_h: height / rows as f32,
             width,
             height,
             cell_start: vec![0; cols * rows + 1],
@@ -41,8 +46,8 @@ impl SpatialHash {
 
     #[inline]
     fn cell_of(&self, x: f32, y: f32) -> usize {
-        let cx = ((x / self.cell) as usize).min(self.cols - 1);
-        let cy = ((y / self.cell) as usize).min(self.rows - 1);
+        let cx = ((x / self.cell_w) as usize).min(self.cols - 1);
+        let cy = ((y / self.cell_h) as usize).min(self.rows - 1);
         cy * self.cols + cx
     }
 
@@ -99,25 +104,47 @@ impl SpatialHash {
         reject: F,
     ) -> Option<Hit> {
         let r2 = radius * radius;
-        let max_ring = (radius / self.cell).ceil() as i32;
-        let cx = ((x / self.cell) as i32).min(self.cols as i32 - 1);
-        let cy = ((y / self.cell) as i32).min(self.rows as i32 - 1);
+        let cols = self.cols as i32;
+        let rows = self.rows as i32;
+        let min_cell = self.cell_w.min(self.cell_h);
+        // Rings beyond half the grid only revisit cells already seen.
+        let max_ring = ((radius / min_cell).ceil() as i32).min(cols.max(rows) / 2);
+        let fx = x / self.cell_w;
+        let fy = y / self.cell_h;
+        let cx = (fx as i32).min(cols - 1);
+        let cy = (fy as i32).min(rows - 1);
+        // Distance from the query point to the nearest edge of its own cell,
+        // which tightens the lower bound on everything in outer rings.
+        let ex = (fx - cx as f32).min(cx as f32 + 1.0 - fx).max(0.0) * self.cell_w;
+        let ey = (fy - cy as f32).min(cy as f32 + 1.0 - fy).max(0.0) * self.cell_h;
+        let edge = ex.min(ey);
         let mut best: Option<Hit> = None;
         for ring in 0..=max_ring {
-            // Anything in this ring is at least (ring-1)*cell away.
             if let Some(b) = best {
-                let lower = (ring - 1).max(0) as f32 * self.cell;
+                // Anything in this ring is at least this far away.
+                let lower = (ring - 1).max(0) as f32 * min_cell + if ring > 0 { edge } else { 0.0 };
                 if b.dist2 <= lower * lower {
                     break;
                 }
             }
             for oy in -ring..=ring {
+                let mut gy = cy + oy;
+                if gy < 0 {
+                    gy += rows;
+                } else if gy >= rows {
+                    gy -= rows;
+                }
+                let row_base = gy as usize * self.cols;
                 let edge_row = oy == -ring || oy == ring;
                 let mut ox = -ring;
                 while ox <= ring {
-                    let gx = (cx + ox).rem_euclid(self.cols as i32) as usize;
-                    let gy = (cy + oy).rem_euclid(self.rows as i32) as usize;
-                    let c = gy * self.cols + gx;
+                    let mut gx = cx + ox;
+                    if gx < 0 {
+                        gx += cols;
+                    } else if gx >= cols {
+                        gx -= cols;
+                    }
+                    let c = row_base + gx as usize;
                     let (s, e) = (self.cell_start[c] as usize, self.cell_start[c + 1] as usize);
                     for &idx in &self.items[s..e] {
                         if idx == skip {
@@ -133,10 +160,6 @@ impl SpatialHash {
                     // Interior rows only visit the two edge columns.
                     ox += if edge_row || ox == ring { 1 } else { 2 * ring };
                 }
-            }
-            // A small world can wrap onto itself; never walk more cells than exist.
-            if (2 * ring + 1) as usize >= self.cols.max(self.rows) {
-                break;
             }
         }
         best

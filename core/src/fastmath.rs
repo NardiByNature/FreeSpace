@@ -5,19 +5,22 @@
 pub const PI: f32 = core::f32::consts::PI;
 pub const TAU: f32 = core::f32::consts::TAU;
 
-/// Wrap an angle into [-PI, PI).
+/// Wrap an angle into [-PI, PI). Uses floor-based reduction, so huge inputs
+/// cost the same as small ones (f32 floor is exact on every platform).
 #[inline]
 pub fn wrap_angle(a: f32) -> f32 {
-    let mut a = a;
-    // Angles in this sim never stray far, so a couple of conditional
-    // subtractions beat a floor() call and stay exact.
-    while a >= PI {
-        a -= TAU;
+    if (-PI..PI).contains(&a) {
+        return a;
     }
-    while a < -PI {
-        a += TAU;
+    let k = ((a + PI) / TAU).floor();
+    let r = a - k * TAU;
+    if r >= PI {
+        r - TAU
+    } else if r < -PI {
+        r + TAU
+    } else {
+        r
     }
-    a
 }
 
 /// Odd minimax polynomial for sin on [-PI/2, PI/2].
@@ -118,6 +121,11 @@ mod tests {
     fn wrap_angle_range() {
         for i in -100..100 {
             let a = i as f32 * 0.37;
+            let w = wrap_angle(a);
+            assert!((-PI..PI).contains(&w), "{a} -> {w}");
+            assert!((sin(w) - a.sin()).abs() < 1e-5);
+        }
+        for a in [1.0e5f32, -7.7e5, 3.0e6] {
             let w = wrap_angle(a);
             assert!((-PI..PI).contains(&w), "{a} -> {w}");
         }
