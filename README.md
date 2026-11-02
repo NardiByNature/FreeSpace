@@ -118,8 +118,10 @@ merged into one or two instead of separating, hybrids stayed near zero,
 choosiness drifted with no direction, and no seed produced carnivores where
 the budding worlds did. Recombination breaks up the coadapted brain-and-diet
 combinations that predation needs, and nothing in the model penalises a
-mismatched pair, so there is no pressure for choosiness. That is a real
-result, and the rule ships off by default. Ideas for making it work: a cost
+mismatched pair, so there is no pressure for choosiness. Inheriting hue from one parent instead
+of blending it kept more colour variety (one seed held four bands at 80,000
+ticks) but changed nothing else. That is a real result, and the rule ships
+off by default. Ideas for making it work: a cost
 to hybrid offspring between differently adapted parents, or niches that
 differ enough that a generalist loses. The headless harness has the numbers:
 `cargo run --release --example run -- 1 80000 10000 sexual=1`.
